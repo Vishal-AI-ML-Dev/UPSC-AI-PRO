@@ -254,6 +254,8 @@ def test_api_flows_never_log_raw_tokens(client, monkeypatch, caplog):
     import src.api.routes.auth as auth_mod
     from src.core import email_utils
 
+    # Pin non-production: CI has no .env, and empty ENV + DEBUG=false counts as production.
+    monkeypatch.setattr(settings, "env", "test")
     raw_tokens = []
 
     def _wrap(fn):
