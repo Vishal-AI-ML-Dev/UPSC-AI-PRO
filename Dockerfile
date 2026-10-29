@@ -24,9 +24,9 @@ WORKDIR /app
 
 # Install locked deps first for better layer caching.
 COPY pyproject.toml uv.lock ./
-# Create an isolated venv and install the frozen dependency set.
-RUN uv venv /opt/venv && \
-    VIRTUAL_ENV=/opt/venv uv sync --frozen --no-dev --no-install-project
+# Install the frozen dependency set into /opt/venv (uv's project env; VIRTUAL_ENV is ignored by uv sync).
+RUN UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-dev --no-install-project && \
+    /opt/venv/bin/alembic --version && /opt/venv/bin/uvicorn --version
 
 # ---------- Stage 2: slim runtime ----------
 FROM python:3.13-slim AS runtime
