@@ -1,0 +1,185 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ---- Light theme (default) ---- */
+  :root {
+    --bg: #fbfaf8;
+    --surface: #ffffff;
+    --surface-2: #f4f2ee;
+    --ink: #15171c;
+    --muted: #5c6573;
+    --line: #ebe6dd;
+    --brand: #4338ca;
+    --brand-2: #6d28d9;
+    --accent: #f59e0b;
+    --glow: rgba(99, 90, 230, 0.18);
+    --shadow: rgba(20, 20, 30, 0.08);
+    --ok: #16a34a;
+    --warn: #d97706;
+    --bad: #dc2626;
+    color-scheme: light;
+  }
+
+  /* ---- Dark theme ---- */
+  [data-theme="dark"] {
+    --bg: #0a0d16;
+    --surface: #121726;
+    --surface-2: #171d2e;
+    --ink: #eef1f7;
+    --muted: #97a1b2;
+    --line: #222a3c;
+    --brand: #818cf8;
+    --brand-2: #a78bfa;
+    --accent: #fbbf24;
+    --glow: rgba(129, 140, 248, 0.22);
+    --shadow: rgba(0, 0, 0, 0.5);
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    background-image:
+      radial-gradient(55rem 55rem at 108% -12%, var(--glow), transparent 55%),
+      radial-gradient(45rem 45rem at -12% 112%, var(--glow), transparent 55%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  /* Slim, themed scrollbars for a more modern feel */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-border bg-surface shadow-card transition duration-200;
+  }
+  /* Opt-in hover lift for interactive cards */
+  .card-hover {
+    @apply hover:-translate-y-0.5;
+  }
+  .card-hover:hover {
+    box-shadow: 0 12px 34px var(--shadow);
+    border-color: var(--brand);
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn:active {
+    transform: scale(0.98);
+  }
+  .btn-brand {
+    @apply text-white;
+    background-image: linear-gradient(135deg, var(--brand), var(--brand-2));
+    box-shadow: 0 6px 20px var(--glow);
+  }
+  .btn-brand:hover {
+    filter: brightness(1.06);
+    box-shadow: 0 10px 28px var(--glow);
+  }
+  .btn-ghost {
+    @apply border border-border bg-surface text-fg;
+  }
+  .btn-ghost:hover {
+    border-color: var(--brand);
+    background: var(--surface-2);
+  }
+  .input {
+    @apply w-full rounded-xl border border-border bg-surface2 px-3 py-2 text-fg outline-none transition duration-150 placeholder:text-muted;
+  }
+  .input:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px var(--glow);
+  }
+  .label {
+    @apply mb-1 block text-sm font-medium text-muted;
+  }
+  /* Gradient brand wordmark / headline accent */
+  .brand-text {
+    background: linear-gradient(100deg, var(--brand), var(--brand-2) 55%, var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+/* Chat markdown */
+.prose-chat > :first-child {
+  margin-top: 0;
+}
+.prose-chat > :last-child {
+  margin-bottom: 0;
+}
+.prose-chat p,
+.prose-chat ul,
+.prose-chat ol,
+.prose-chat pre,
+.prose-chat blockquote,
+.prose-chat table {
+  margin: 0.5rem 0;
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  font-weight: 700;
+  margin: 0.75rem 0 0.35rem;
+}
+.prose-chat ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.prose-chat ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.prose-chat code {
+  background: var(--surface-2);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.9em;
+}
+.prose-chat pre {
+  background: var(--surface-2);
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  overflow: auto;
+}
+.prose-chat pre code {
+  background: transparent;
+  padding: 0;
+}
+.prose-chat a {
+  color: var(--brand-2);
+  text-decoration: underline;
+}
+.prose-chat table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.prose-chat th,
+.prose-chat td {
+  border: 1px solid var(--line);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}

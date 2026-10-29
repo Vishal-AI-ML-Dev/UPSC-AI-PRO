@@ -1,0 +1,35 @@
+﻿__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+dist/
+frontend/dist/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+checkpoints.sqlite
+chroma_db/
+# data/: ignore everything by default; publish only the small Mentor KB sources.
+# data/ncert/ (NCERT PDFs, third-party copyright, ~277 MB) stays excluded.
+data/*
+!data/mentor_kb/
+*.zip
+kb_diag.py
+smoke.ps1
+# Logs, private keys/certs, exported browser cookies (YTDLP_COOKIES), editor/agent state
+*.log
+*.pem
+*.key
+cookies*.txt
+.vscode/
+.idea/
+.claude/

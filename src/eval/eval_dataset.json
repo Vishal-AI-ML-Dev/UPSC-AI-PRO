@@ -1,0 +1,23 @@
+[
+  {
+    "question": "What is the main idea of the chapter 'The Wonderful World of Science'?",
+    "ground_truth": "Science is a way of thinking, observing, and doing to understand the world, driven by curiosity, and it is an unending journey of discovery that is useful in daily life.",
+    "persist_key": "ncert_class6_science_1-the_wonderful_world_of_science_pdf",
+    "agent": "ncert",
+    "relevant_keywords": ["science", "curiosity", "discovery"]
+  },
+  {
+    "question": "Why is curiosity important in science according to the chapter?",
+    "ground_truth": "Curiosity is the most important element of scientific exploration; it encourages us to ask questions, observe our surroundings, and explore, which leads to new discoveries.",
+    "persist_key": "ncert_class6_science_1-the_wonderful_world_of_science_pdf",
+    "agent": "ncert",
+    "relevant_keywords": ["curiosity", "questions", "science"]
+  },
+  {
+    "question": "How does the chapter describe science as a journey of discovery?",
+    "ground_truth": "The chapter compares science to a giant, unending jigsaw puzzle where each discovery adds to our knowledge, raises new questions, and can change our understanding of the world.",
+    "persist_key": "ncert_class6_science_1-the_wonderful_world_of_science_pdf",
+    "agent": "ncert",
+    "relevant_keywords": ["discovery", "knowledge", "questions"]
+  }
+]

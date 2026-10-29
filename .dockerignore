@@ -1,0 +1,29 @@
+# Keep the backend image small and secret-free
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.db
+*.sqlite
+*.sqlite3
+chroma_db/
+# NCERT PDFs (~277 MB, local only; deferred for deployment)
+data/ncert/
+.env
+.env.*
+!.env.example
+frontend/
+upsc-frontend/
+tests/
+*.md
+!README.md
+node_modules/
+dist/
+.DS_Store

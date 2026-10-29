@@ -1,0 +1,113 @@
+# Render Blueprint for UPSC AI Pro (FastAPI + LangGraph)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Deploy: push this file to your repo root, then in Render -> "New +" ->
+# "Blueprint" -> pick the repo. Render reads this file and provisions the
+# service automatically.
+#
+# Vectors now live in Qdrant (managed), so NO persistent disk is needed and the
+# service runs on the FREE plan. The app is stateless: embeddings are in Qdrant,
+# all user/auth/history data is in Supabase Postgres.
+#
+# Secrets (sync: false) are NOT stored in this file. Set them once in the
+# Render dashboard (Environment tab). Never commit real keys.
+
+services:
+  - type: web
+    # Must differ from the old (retired) service. The name also seeds the
+    # default <name>.onrender.com URL; change it here if it is already taken.
+    name: upsc-ai-pro-api
+    runtime: python
+    plan: free               # no disk needed -> free plan works (sleeps on idle)
+    region: singapore        # keep close to your Supabase region (ap-southeast-1)
+    branch: main
+
+    # uv-based build: install uv, then sync the locked dependency set.
+    buildCommand: "pip install uv && uv sync --frozen"
+
+    # Bind to Render's injected $PORT. host 0.0.0.0 is required on Render.
+    # Apply DB migrations (idempotent) before booting so the schema is always
+    # current on deploy. `alembic upgrade head` is a no-op when up to date.
+    # --proxy-headers + FORWARDED_ALLOW_IPS (below): the rate limiter must see
+    # the real client IP, not Render's proxy address.
+    startCommand: "uv run alembic upgrade head && uv run uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --proxy-headers"
+
+    # Render pings this to decide if a deploy is healthy.
+    healthCheckPath: /health
+
+    envVars:
+      # ----- Runtime -----
+      - key: PYTHON_VERSION
+        value: "3.13.13"
+      # Authoritative production signal (JWT-secret strictness, email gates).
+      - key: ENV
+        value: production
+
+      # ----- Client IP behind Render's proxy (read by uvicorn) -----
+      # Trust X-Forwarded-For only from private-network peers (Render's proxy);
+      # uvicorn then takes the right-most untrusted entry, so a client cannot
+      # spoof its IP by sending its own header. NEVER use "*": uvicorn would
+      # then trust the left-most (client-controlled) entry.
+      - key: FORWARDED_ALLOW_IPS
+        value: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+      # ----- Uploads (max PDF/audio size in MB) -----
+      - key: MAX_UPLOAD_MB
+        value: "50"
+
+      # ----- Vector store: Qdrant (managed). No disk required. -----
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: SIMILARITY_THRESHOLD
+        value: "0.3"
+      - key: MENTOR_KB_THRESHOLD
+        value: "0.25"
+
+      # ----- LLM providers -----
+      - key: ENABLE_PROVIDER_FALLBACK
+        value: "true"
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+
+      # ----- Supabase Postgres (DB + custom JWT auth + checkpointer + store) -----
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "false"
+
+      # ----- Web search -----
+      - key: TAVILY_API_KEY
+        sync: false
+
+      # ----- Observability -----
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com
+
+      # ----- Frontend links -----
+      # Exact frontend origin(s), comma-separated, no trailing slash, no "*",
+      # e.g. https://<your-frontend>.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+      # Frontend base URL used in password-reset / verification links,
+      # e.g. https://<your-frontend>.vercel.app (no trailing slash).
+      - key: FRONTEND_URL
+        sync: false
+
+      # ----- Admin allowlist (cost dashboard); comma-separated emails -----
+      - key: ADMIN_EMAILS
+        sync: false
+
+      # Not set here (add in the dashboard when enabled): SMTP_* (without SMTP,
+      # forgot-password returns 503 in production), UPSTASH_REDIS_REST_*,
+      # SENTRY_DSN. LLM_MODEL / WEB_SEARCH_ENABLED use code defaults until
+      # the model and web-search policy is decided.
