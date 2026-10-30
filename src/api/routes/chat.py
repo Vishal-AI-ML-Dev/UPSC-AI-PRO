@@ -33,6 +33,7 @@ from src.core.config import settings
 from src.core.grounding import unstreamed_tail
 from src.core.llm import is_llm_timeout
 from src.core.response_cache import get_response_cache
+from src.core.scope_gate import check_scope
 from src.graph.app_graph import make_config
 from src.graph.memory import get_store, load_student_profile, save_student_profile
 from src.graph.profile import extract_student_profile_signals, merge_student_profile
@@ -127,7 +128,19 @@ def agent_chat_stream(
 
     A cache hit streams the stored answer in small slices (still smooth for the
     client) without touching the graph.
+
+    The UPSC-only scope gate runs first: bare greetings and clearly
+    out-of-scope requests get a fixed, language-matched reply with no cache,
+    LLM, web-search or knowledge-base call.
     """
+    decision = check_scope(payload.question)
+    if decision.blocked:
+        # Log the decision only - never the student's message text.
+        logger.info("scope gate: %s (%s, %s)", decision.verdict, decision.reason, decision.language)
+        return StreamingResponse(
+            guard_stream(iter([decision.reply]), user), media_type="text/plain"
+        )
+
     agent_graph = getattr(request.app.state, "agent_graph", None)
     if agent_graph is None:
         raise HTTPException(
