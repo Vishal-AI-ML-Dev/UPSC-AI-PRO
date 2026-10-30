@@ -2,17 +2,21 @@
 NCERT Agent - PDF reading, notes generation, RAG chat
 """
 
+import io
 import logging
-import os
 import re
-from functools import lru_cache
 
 from langchain_core.documents import Document
 from pypdf import PdfReader
 
 from src.agents.ncert.prompts import CHAT_PROMPT, NOTES_PROMPT
-from src.core.config import settings
 from src.core.llm import describe_exception, get_llm, message_text
+from src.core.ncert_storage import (
+    NcertPdfError,
+    chapter_ref,
+    get_ncert_source,
+    is_valid_segment,
+)
 from src.core.vector_store import (
     get_text_splitter,
     load_vector_store,
@@ -23,8 +27,6 @@ from src.core.vector_store import (
 )
 
 logger = logging.getLogger(__name__)
-
-BASE = settings.ncert_data_dir
 
 # ─────────────────────────────────────────
 # SUBJECT DETECTION
@@ -116,35 +118,28 @@ NCERT_UNAVAILABLE_MESSAGE = (
 )
 
 
-@lru_cache(maxsize=1)
+NCERT_TEMPORARILY_UNAVAILABLE_MESSAGE = (
+    "The NCERT library is temporarily unavailable. Please try again later. "
+    "Other features are unaffected."
+)
+
+
+# The storage backend (private R2 bucket or local folder) owns listing and
+# allow-listing; see src.core.ncert_storage. Listing raises NcertUnavailable
+# when the backend can't be reached.
 def get_classes() -> list[str]:
     """Get available NCERT classes."""
-    if not os.path.exists(BASE):
-        logger.warning(
-            "NCERT base directory not found: %s. Place chapter PDFs as "
-            "<NCERT_DATA_DIR>/<class>/<subject>/<chapter>.pdf (or set NCERT_DATA_DIR).",
-            BASE,
-        )
-        return []
-    return sorted(os.listdir(BASE))
+    return get_ncert_source().classes()
 
 
-@lru_cache(maxsize=50)
 def get_subjects(class_name: str) -> list[str]:
-    """Get subjects for a class."""
-    path = f"{BASE}/{class_name}"
-    if not os.path.exists(path):
-        return []
-    return sorted(os.listdir(path))
+    """Get subjects for a class ([] for unknown or invalid names)."""
+    return get_ncert_source().subjects(class_name)
 
 
-@lru_cache(maxsize=200)
 def get_chapters(class_name: str, subject: str) -> list[str]:
-    """Get chapters for a subject."""
-    path = f"{BASE}/{class_name}/{subject}"
-    if not os.path.exists(path):
-        return []
-    return sorted(os.listdir(path))
+    """Get chapters for a subject ([] for unknown or invalid names)."""
+    return get_ncert_source().chapters(class_name, subject)
 
 
 # ─────────────────────────────────────────
@@ -157,35 +152,43 @@ def read_chapter_pages(
 ) -> tuple[list[tuple[int, str]], str]:
     """Read a chapter PDF page by page.
 
-    Returns ``([(pdf_page, text), ...], path)``. ``pdf_page`` is the 1-based
-    physical page index inside the PDF file - NOT the printed book page number,
-    which is never guessed. Pages without extractable text are skipped.
-    """
-    path = f"{BASE}/{class_name}/{subject}/{chapter}"
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"PDF not found: {path}")
+    Returns ``([(pdf_page, text), ...], ref)``. ``ref`` is the relative chapter
+    reference (``class/subject/chapter.pdf``), never a server path or storage
+    URL. ``pdf_page`` is the 1-based physical page index inside the PDF file -
+    NOT the printed book page number, which is never guessed. Pages without
+    extractable text are skipped.
 
-    pdf = PdfReader(path)
-    pages = []
-    for number, page in enumerate(pdf.pages, start=1):
-        extracted = page.extract_text()
-        if extracted and extracted.strip():
-            pages.append((number, extracted))
+    Only an allow-listed (class, subject, chapter) is ever read; anything else
+    raises NcertNotFound before any file or bucket access.
+    """
+    data = get_ncert_source().read_pdf(class_name, subject, chapter)
+    ref = chapter_ref(class_name, subject, chapter)
+
+    try:
+        pdf = PdfReader(io.BytesIO(data))
+        pages = []
+        for number, page in enumerate(pdf.pages, start=1):
+            extracted = page.extract_text()
+            if extracted and extracted.strip():
+                pages.append((number, extracted))
+    except Exception as e:
+        logger.error("NCERT PDF parse failed: %s", type(e).__name__)
+        raise NcertPdfError("Could not read this chapter PDF.") from None
 
     if not pages:
-        raise ValueError(
+        raise NcertPdfError(
             "Could not extract text from this PDF.\n"
             "The file may be scanned/image-based. Only text-based PDFs are supported."
         )
 
-    logger.info(f"PDF read: {class_name}/{subject}/{chapter} — {len(pages)} pages")
-    return pages, path
+    logger.info(f"PDF read: {ref} — {len(pages)} pages")
+    return pages, ref
 
 
 def read_chapter_pdf(class_name: str, subject: str, chapter: str) -> tuple[str, str]:
-    """Read chapter PDF and return text + path."""
-    pages, path = read_chapter_pages(class_name, subject, chapter)
-    return "".join(text + "\n" for _, text in pages), path
+    """Read chapter PDF and return text + relative chapter reference."""
+    pages, ref = read_chapter_pages(class_name, subject, chapter)
+    return "".join(text + "\n" for _, text in pages), ref
 
 
 def ncert_persist_key(class_name: str, subject: str, chapter: str) -> str:
@@ -218,7 +221,7 @@ def generate_study_session(class_name: str, subject: str, chapter: str) -> dict:
     """Generate complete study session with notes, mindmap, questions."""
 
     # Read PDF (page by page, so chunks can keep their page reference)
-    pages, path = read_chapter_pages(class_name, subject, chapter)
+    pages, ref = read_chapter_pages(class_name, subject, chapter)
     text = "".join(page_text + "\n" for _, page_text in pages)
 
     # Detect subject area
@@ -271,9 +274,9 @@ def generate_study_session(class_name: str, subject: str, chapter: str) -> dict:
                 "class_name": class_name,
                 "subject": subject,
                 "chapter": chapter,
-                "document": os.path.basename(path),
+                "document": chapter,
                 "source_title": f"NCERT {class_name} {subject} - {chapter}",
-                "source_path": path,
+                "source_path": ref,
             },
         )
         upsert_documents(key, docs, rebuild=False)
@@ -290,7 +293,7 @@ def generate_study_session(class_name: str, subject: str, chapter: str) -> dict:
         "notes": notes,
         "mindmap_html": mindmap_html,
         "questions_html": questions_html,
-        "chapter_path": path,
+        "chapter_path": ref,
     }
 
 
@@ -309,6 +312,11 @@ def ask_ncert(
     """Chat about NCERT chapter (streaming)."""
     if not question or not question.strip():
         yield "Please ask a specific question about the chapter."
+        return
+    # Chat only reads the chapter's index (no file/bucket access), but reject
+    # names that could never be a real chapter before deriving an index key.
+    if not all(is_valid_segment(p) for p in (class_name, subject, chapter)):
+        yield "Please generate study session first before chatting."
         return
 
     # Load the page-aware vector store (Qdrant in prod, local Chroma fallback)

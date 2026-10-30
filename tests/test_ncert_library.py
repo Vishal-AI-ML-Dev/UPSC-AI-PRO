@@ -3,22 +3,20 @@
 import pytest
 
 import src.agents.ncert.graph as ncert_graph
+from src.core.ncert_storage import LocalNcertSource, set_ncert_source
 
 NCERT = "/api/v1/ncert"
 
 
 @pytest.fixture
-def ncert_base(monkeypatch):
-    """Point the NCERT module at a chosen directory with fresh listing caches."""
+def ncert_base():
+    """Point the NCERT library at a chosen local directory (fresh catalog)."""
 
     def _set(path):
-        monkeypatch.setattr(ncert_graph, "BASE", str(path))
-        for fn in (ncert_graph.get_classes, ncert_graph.get_subjects, ncert_graph.get_chapters):
-            fn.cache_clear()
+        set_ncert_source(LocalNcertSource(str(path)))
 
     yield _set
-    for fn in (ncert_graph.get_classes, ncert_graph.get_subjects, ncert_graph.get_chapters):
-        fn.cache_clear()
+    set_ncert_source(None)
 
 
 def test_missing_library_returns_setup_message(client, make_user, ncert_base, tmp_path):

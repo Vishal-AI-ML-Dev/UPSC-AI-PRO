@@ -136,7 +136,24 @@ class Settings(BaseSettings):
     # NCERT content library (folder of class/subject/chapter PDFs).
     # Empty/missing => NCERT browse shows no content (app still runs, no crash).
     # In prod point to a persistent path, e.g. NCERT_DATA_DIR=/var/data/ncert
+    # Used only when Cloudflare R2 (below) is not configured.
     ncert_data_dir: str = "data/ncert"
+
+    # NCERT PDFs in a PRIVATE Cloudflare R2 bucket (S3-compatible). When all four
+    # R2_* values are set, the library is read from R2 instead of NCERT_DATA_DIR.
+    # PDFs are fetched server-side with these credentials only: no public or
+    # presigned URLs are ever produced. Use an Object-Read-only token scoped to
+    # the bucket. Partial R2 config => NCERT library reported as unavailable.
+    r2_endpoint_url: str = ""
+    r2_bucket_name: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    # Key prefix holding <class>/<subject>/<chapter>.pdf inside the bucket.
+    ncert_r2_prefix: str = "ncert/"
+    # Largest chapter PDF the server will download (MB); bigger objects are refused.
+    ncert_max_pdf_mb: int = Field(default=50, gt=0, le=500)
+    # How long the bucket listing (class/subject/chapter catalog) is cached.
+    ncert_catalog_ttl_seconds: int = Field(default=600, ge=0, le=86400)
 
     # Uploads
     max_upload_mb: int = 50  # is se badi file -> 413 (Too Large). Override via MAX_UPLOAD_MB env.
@@ -430,6 +447,12 @@ class Settings(BaseSettings):
             "rerank_model",
             "cohere_api_key",
             "cohere_rerank_model",
+            "ncert_data_dir",
+            "r2_endpoint_url",
+            "r2_bucket_name",
+            "r2_access_key_id",
+            "r2_secret_access_key",
+            "ncert_r2_prefix",
         ):
             setattr(self, field_name, _clean(getattr(self, field_name)))
 

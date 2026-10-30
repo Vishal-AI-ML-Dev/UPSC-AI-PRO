@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableLambda
 
 import src.agents.ncert.graph as ncert
+from src.core.ncert_storage import LocalNcertSource, set_ncert_source
 
 STUDY = "/api/v1/ncert/study"
 BODY = {"class_name": "class6", "subject": "socialscience", "chapter": "ch.pdf"}
@@ -73,7 +74,7 @@ def ingest_env(monkeypatch):
     monkeypatch.setattr(
         ncert,
         "read_chapter_pages",
-        lambda c, s, ch: ([(1, PAGE_1), (3, PAGE_3)], "/x/class6/ss/ch.pdf"),
+        lambda c, s, ch: ([(1, PAGE_1), (3, PAGE_3)], "class6/socialscience/ch.pdf"),
     )
     monkeypatch.setattr(
         ncert, "get_llm", lambda: RunnableLambda(lambda _: AIMessage(content="notes"))
@@ -103,6 +104,7 @@ def test_ingest_keeps_document_page_and_chunk_metadata(ingest_env):
     for d in docs:
         md = d.metadata
         assert md["document"] == "ch.pdf" and md["source_type"] == "ncert"
+        assert md["source_path"] == "class6/socialscience/ch.pdf"  # relative, no server path
         assert md["persist_key"] == ingest_env["key"]
         assert "book_page" not in md and "page" not in md  # printed page numbers are never guessed
         expected = PAGE_1 if md["pdf_page"] == 1 else PAGE_3
@@ -129,12 +131,16 @@ def test_read_chapter_pages_uses_physical_page_numbers(monkeypatch, tmp_path):
 
     (tmp_path / "c" / "s").mkdir(parents=True)
     (tmp_path / "c" / "s" / "ch.pdf").write_bytes(b"%PDF-stub")
-    monkeypatch.setattr(ncert, "BASE", str(tmp_path))
+    set_ncert_source(LocalNcertSource(str(tmp_path)))
     monkeypatch.setattr(ncert, "PdfReader", _Reader)
-    pages, _ = ncert.read_chapter_pages("c", "s", "ch.pdf")
-    assert pages == [(1, "one"), (3, "three")]
-    text, _ = ncert.read_chapter_pdf("c", "s", "ch.pdf")
-    assert text == "one\nthree\n"
+    try:
+        pages, ref = ncert.read_chapter_pages("c", "s", "ch.pdf")
+        assert pages == [(1, "one"), (3, "three")]
+        assert ref == "c/s/ch.pdf"  # relative reference, never a server path
+        text, _ = ncert.read_chapter_pdf("c", "s", "ch.pdf")
+        assert text == "one\nthree\n"
+    finally:
+        set_ncert_source(None)
 
 
 # --------------------------------------------------------------------------- #

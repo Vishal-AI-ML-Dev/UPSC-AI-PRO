@@ -20,14 +20,13 @@ key or `JWT_SECRET` from the old deployment.
 | Redis (cache / rate limit) | **Upstash Redis** | Optional; single worker works without it |
 | Web search | Tavily or built-in DuckDuckGo | Optional |
 | Observability | Langfuse + Sentry | Optional |
-| NCERT PDFs | **Not included in the first deployment** | See "First-deployment scope" |
+| NCERT PDFs | **Cloudflare R2** (private bucket) | See "NCERT library (Cloudflare R2)" |
 
 ## First-deployment scope (confirmed decisions)
 
-- **NCERT PDFs are deferred.** They are excluded from Git (`data/ncert/`) and
-  Render's free disk is ephemeral. Leave `NCERT_DATA_DIR` unset: the NCERT
-  library then shows no content; the rest of the app is unaffected. A storage
-  option (persistent disk or object storage) will be chosen later.
+- **NCERT PDFs are served from a private Cloudflare R2 bucket.** They stay
+  excluded from Git and the Docker image (`data/ncert/`). See
+  "NCERT library (Cloudflare R2)" below.
 - **Password reset is unavailable until SMTP is configured.** In production,
   forgot-password returns **503** ("Email delivery is not configured") instead
   of sending mail; nothing is logged. Keep `REQUIRE_EMAIL_VERIFICATION=false`
@@ -108,6 +107,23 @@ network. Run them from the project root with production `QDRANT_*` values in
 your local `.env` only when you intend to, e.g.
 `uv run python scripts/ingest_mentor_kb.py`.
 
+## NCERT library (Cloudflare R2)
+- PDFs live in a **private** R2 bucket as `ncert/<class>/<subject>/<chapter>.pdf`
+  (e.g. `ncert/class7/socialscience(Part-1)/...pdf`). The backend lists and
+  downloads them server-side; it never creates public or presigned URLs and
+  never returns bucket keys, endpoints or server paths to clients.
+- Render environment (dashboard only): `R2_ENDPOINT_URL`, `R2_BUCKET_NAME`,
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. All four must be set; a partial
+  set marks the library unavailable. Optional: `NCERT_R2_PREFIX` (default
+  `ncert/`), `NCERT_MAX_PDF_MB` (50), `NCERT_CATALOG_TTL_SECONDS` (600).
+- Cloudflare: keep the bucket's public access (r2.dev URL and custom domains)
+  **disabled**, and use an API token with **Object Read only** on this bucket.
+- Only (class, subject, chapter) names present in the bucket listing are ever
+  read; anything else returns 404 "Chapter not found". If R2 is unreachable the
+  library shows "temporarily unavailable" (503 for study requests).
+- Chapter chat still needs Qdrant: `/ncert/study` builds the chapter's index.
+- Without R2 settings (local dev) the library reads `NCERT_DATA_DIR`.
+
 ## Step 7 — CI/CD
 - `.github/workflows/ci.yml` runs lint, tests and the frontend build without
   secrets. The scheduled/manual `llm-eval` job needs repository secrets
@@ -123,6 +139,9 @@ your local `.env` only when you intend to, e.g.
 - Register, log in, refresh and log out work in the browser (no CORS errors).
 - One Mentor question answers (live Gemini call).
 - Planner and Evaluator each answer once.
+- NCERT: `/ncert/classes` lists class6 and class7 from R2; one chapter's study
+  session generates notes (and, with Qdrant configured, chapter chat answers
+  with `[S#]` citations).
 - Password reset shows the "not configured" message (expected until SMTP).
 
 ---

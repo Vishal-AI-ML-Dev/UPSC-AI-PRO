@@ -65,6 +65,19 @@ services:
       - key: MENTOR_KB_THRESHOLD
         value: "0.25"
 
+      # ----- NCERT PDFs: private Cloudflare R2 bucket (server-side reads only) -----
+      # Values live in the Render dashboard; sync:false never stores them here.
+      # Use an Object-Read-only R2 token scoped to the bucket; keep public
+      # access (r2.dev URL / custom domain) disabled on the bucket.
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+
       # ----- LLM providers -----
       - key: ENABLE_PROVIDER_FALLBACK
         value: "true"
