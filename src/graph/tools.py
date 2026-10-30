@@ -28,8 +28,13 @@ from typing import Any, Callable, Optional
 
 from src.core.grounding import (
     citations_from_tool_messages,
+    cited_numbers,
     filter_kb_citations_by_overlap,
     format_sources,
+    format_sources_block,
+    number_web_sources,
+    web_citation_label,
+    web_sources_from_tool_messages,
 )
 from src.core.model_router import describe_route
 
@@ -61,7 +66,10 @@ DEFAULT_TOOL_SYSTEM = (
     "affairs, PYQ practice, or mains answer evaluation); do NOT dump "
     "generic exam-pattern, syllabus, or eligibility information unless they "
     "actually ask for it. After using tools, answer concisely in the student's "
-    "language and cite any source labels returned by the tools. "
+    "language. When a statement relies on a web_search result, cite it inline "
+    "with that result's bracketed number, e.g. [1] or [2], using ONLY numbers "
+    "shown in the web_search output; never invent sources, URLs or publication "
+    "dates, and do not use bracketed numbers for knowledge-base passages. "
     "CRITICAL - never fabricate time-sensitive facts: for exam dates, "
     "results, notifications, cut-offs or vacancies, rely ONLY on the "
     "web_search output. If web_search returns no results, an error, or "
@@ -85,33 +93,62 @@ DEFAULT_TOOL_SYSTEM = (
 # --------------------------------------------------------------------------- #
 # 1. Plain tool implementations (lazy heavy imports)
 # --------------------------------------------------------------------------- #
-def web_search_tool_fn(query: str) -> str:
-    """Live web search over trusted UPSC/news sources. Returns a text digest.
+WEB_NO_RESULTS = (
+    "No live web results found (search backend unavailable or returned "
+    "nothing). Do not answer dated facts from memory."
+)
 
-    Degrades gracefully: if the search backend is unconfigured (e.g. missing
-    TAVILY_API_KEY) or returns nothing, we return an honest "no results"
-    string instead of raising, so the model can admit it lacks live data
-    rather than answering a dated fact from stale memory.
+# Trusted instruction appended OUTSIDE the untrusted fence of a web digest.
+WEB_CITE_INSTRUCTION = (
+    "Cite these results inline by their bracketed numbers, e.g. [1]. Use only "
+    "the numbers listed above. Where a result says 'date not available', do not "
+    "state a publication date for it."
+)
+
+
+def render_web_results(sources: list, numbers=None) -> str:
+    """Model-facing text for structured web results (dicts of ``SearchResult``).
+
+    Live web text is UNTRUSTED, so the digest is fenced; the citation
+    instruction is ours and stays outside the fence.
+    """
+    from src.core.prompt_safety import harden_untrusted
+    from src.core.web_search import SearchResult, format_digest
+
+    results = [r for r in (SearchResult.from_dict(s) for s in sources or []) if r]
+    if not results:
+        return WEB_NO_RESULTS
+    if numbers is None:
+        numbers = [s.get("n") or i for i, s in enumerate(sources, start=1)]
+    digest = format_digest(results, numbers)
+    return harden_untrusted(digest, label="live web search results") + "\n\n" + WEB_CITE_INSTRUCTION
+
+
+def web_search_with_sources(query: str) -> tuple:
+    """Structured live search: ``(model_text, {"sources": [SearchResult dicts]})``.
+
+    The second element travels as the ``ToolMessage.artifact`` - citations are
+    built from it, never parsed out of (untrusted) text. Degrades gracefully: no
+    backend / no results -> an honest "no results" text and no sources, so the
+    model admits it lacks live data instead of answering from stale memory.
     """
     query = (query or "").strip()
     if not query:
-        return "No query provided."
+        return "No query provided.", {"sources": []}
     try:
-        from src.agents.mentor.graph import _fetch_search_context
+        from src.core.web_search import search_web
 
-        result = _fetch_search_context(query)
+        results = search_web(query)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("web_search unavailable: %s", exc)
-        result = ""
-    if result:
-        # Live web text is UNTRUSTED - fence it before the model reads it.
-        from src.core.prompt_safety import harden_untrusted
+        logger.warning("web_search unavailable: %s", type(exc).__name__)
+        results = []
+    sources = [r.to_dict() for r in results]
+    return render_web_results(sources), {"sources": sources}
 
-        return harden_untrusted(result, label="live web search results")
-    return (
-        "No live web results found (search backend unavailable or returned "
-        "nothing). Do not answer dated facts from memory."
-    )
+
+def web_search_tool_fn(query: str) -> str:
+    """Live web search as plain text (MCP server / string-only callers)."""
+    return web_search_with_sources(query)[0]
 
 
 # Jab KB me kuch na mile ya fail ho -- model ko clearly bolo ki apne knowledge se
@@ -199,8 +236,10 @@ def knowledge_base_tool_fn(query: str, persist_key: str = "") -> str:
 
 
 # Registry: tool name -> plain callable. Names MUST match get_structured_tools().
-TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
-    "web_search": web_search_tool_fn,
+# A tool returns either plain text or a ``(text, artifact)`` pair; the artifact
+# carries structured provenance (web_search sources) for citations.
+TOOL_FUNCTIONS: dict[str, Callable[..., Any]] = {
+    "web_search": web_search_with_sources,
     "knowledge_base_search": knowledge_base_tool_fn,
 }
 
@@ -220,7 +259,8 @@ def run_tool_calls(
         registry: name -> callable. Defaults to ``TOOL_FUNCTIONS``.
 
     Returns:
-        One result dict per call: ``{"tool_call_id", "name", "content"}``.
+        One result dict per call: ``{"tool_call_id", "name", "content"}``, plus
+        ``"artifact"`` when the tool returned a ``(text, artifact)`` pair.
         Unknown tools and tool exceptions are converted into ``ERROR: ...``
         content instead of raising, so the loop can hand them back to the model.
     """
@@ -231,6 +271,7 @@ def run_tool_calls(
         args = (call.get("args") if isinstance(call, dict) else None) or {}
         call_id = call.get("id", "") if isinstance(call, dict) else ""
         fn = reg.get(name)
+        artifact = None
         if fn is None:
             available = ", ".join(sorted(reg)) or "(none)"
             content = f"ERROR: unknown tool '{name}'. Available tools: {available}."
@@ -238,7 +279,11 @@ def run_tool_calls(
             content = f"ERROR: tool '{name}' expects an object of arguments."
         else:
             try:
-                content = str(fn(**args))
+                output = fn(**args)
+                if isinstance(output, tuple) and len(output) == 2:
+                    content, artifact = str(output[0]), output[1]
+                else:
+                    content = str(output)
             except TypeError as exc:
                 content = f"ERROR: bad arguments for tool '{name}': {exc}"
             except Exception as exc:  # noqa: BLE001
@@ -248,7 +293,10 @@ def run_tool_calls(
                     content = KB_FALLBACK_NOTE
                 else:
                     content = f"ERROR: tool '{name}' failed: {exc}"
-        results.append({"tool_call_id": call_id, "name": name, "content": content})
+        result = {"tool_call_id": call_id, "name": name, "content": content}
+        if artifact is not None:
+            result["artifact"] = artifact
+        results.append(result)
     return results
 
 
@@ -337,11 +385,14 @@ def to_tool_messages(results: list[dict]) -> list:
     """Convert ``run_tool_calls`` output into LangChain ``ToolMessage`` objects."""
     from langchain_core.messages import ToolMessage
 
+    # ``artifact`` is kept on the message (and in the checkpoint) for citation
+    # provenance but is never sent to the model provider.
     return [
         ToolMessage(
             content=r["content"],
             tool_call_id=r.get("tool_call_id", ""),
             name=r.get("name", ""),
+            artifact=r.get("artifact"),
         )
         for r in results
     ]
@@ -523,23 +574,43 @@ def build_tool_agent(
             # Only THIS question's tool results count: sources fetched for
             # earlier turns on the thread must never be cited again.
             turn = current_turn(history)
+            # Structured web sources come from tool artifacts (never from text).
+            web_sources = web_sources_from_tool_messages(turn)
             citations = citations_from_tool_messages(turn)
             # Honesty guard: only keep a KB source if the answer actually used
             # its content (prevents a strategy note being cited under an answer
             # the model wrote from its own knowledge).
             citations = filter_kb_citations_by_overlap(answer, turn, citations)
-            if citations:
+            if web_sources or cited_numbers(answer):
+                # Numbered [n] citations: list cited sources (or all retrieved,
+                # clearly marked as not cited inline) and flag invented numbers.
+                answer = answer + format_sources_block(answer, web_sources, citations)
+                citations = [web_citation_label(s) for s in web_sources] + citations
+            elif citations:
                 answer = answer + format_sources(citations)
             out["answer"] = answer
             out["citations"] = citations
         return out
 
     def tools_node(state) -> dict:
-        last = state["messages"][-1]
+        messages = state["messages"]
+        last = messages[-1]
         calls = getattr(last, "tool_calls", None) or []
         results = run_tool_calls(
             [{"name": c["name"], "args": c.get("args", {}), "id": c.get("id", "")} for c in calls]
         )
+        # Number web results once per user question: a URL keeps its number
+        # across searches, so inline [n] in the answer stays unambiguous.
+        numbered = web_sources_from_tool_messages(current_turn(messages))
+        for r in results:
+            artifact = r.get("artifact")
+            if r.get("name") != "web_search" or not isinstance(artifact, dict):
+                continue
+            sources = number_web_sources(numbered, artifact.get("sources"))
+            r["artifact"] = {"sources": sources}
+            if sources:
+                r["content"] = render_web_results(sources)
+                numbered = numbered + [s for s in sources if s not in numbered]
         return {"messages": to_tool_messages(results)}
 
     def should_continue(state) -> str:

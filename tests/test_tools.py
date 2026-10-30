@@ -45,6 +45,24 @@ def test_dispatch_runs_tool_and_preserves_id():
     assert out == [{"tool_call_id": "call_1", "name": "web_search", "content": "echo:prelims date"}]
 
 
+def test_dispatch_keeps_artifact_from_text_artifact_pair():
+    registry = {"web_search": lambda query: (f"text:{query}", {"sources": [{"url": "u"}]})}
+    calls = [{"name": "web_search", "args": {"query": "q"}, "id": "c1"}]
+    assert run_tool_calls(calls, registry=registry) == [
+        {
+            "tool_call_id": "c1",
+            "name": "web_search",
+            "content": "text:q",
+            "artifact": {"sources": [{"url": "u"}]},
+        }
+    ]
+
+
+def test_dispatch_plain_string_has_no_artifact_key():
+    out = run_tool_calls([{"name": "web_search", "args": {"query": "q"}, "id": "x"}], FAKE)
+    assert "artifact" not in out[0]
+
+
 def test_dispatch_passes_multiple_kwargs():
     calls = [
         {

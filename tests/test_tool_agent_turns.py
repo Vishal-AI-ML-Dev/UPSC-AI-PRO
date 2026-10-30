@@ -168,3 +168,112 @@ def test_tool_rounds_ignores_earlier_turns():
     history += [AIMessage(content="a1"), HumanMessage(content="q2")]
     assert tool_rounds(history) == 0
     assert tool_rounds(history + [_ai_call()]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Structured web sources (artifacts) through the real agent loop
+# --------------------------------------------------------------------------- #
+def _source(url, title, published=""):
+    return {
+        "title": title,
+        "url": url,
+        "publisher": "",
+        "published": published,
+        "snippet": "s",
+        "provider": "fake",
+        "official": False,
+    }
+
+
+PIB = "https://pib.gov.in/PressReleasePage.aspx?PRID=7"
+HINDU = "https://www.thehindu.com/news/story"
+IE = "https://indianexpress.com/article/x"
+
+
+class _TwoSearches:
+    """Searches twice in one question, then answers citing the given numbers."""
+
+    def __init__(self, with_tools, answer, seen):
+        self.with_tools = with_tools
+        self.answer = answer
+        self.seen = seen
+
+    def invoke(self, messages):
+        rounds = sum(1 for m in tools_mod.current_turn(messages) if getattr(m, "tool_calls", None))
+        self.seen.append([m.content for m in messages if m.type == "tool"])
+        if self.with_tools and rounds < 2:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "web_search", "args": {"query": f"q{rounds}"}, "id": f"s{rounds}"}
+                ],
+            )
+        return AIMessage(content=self.answer)
+
+
+def _structured_agent(monkeypatch, answer, checkpointer=None):
+    seen: list = []
+    monkeypatch.setattr(llm_mod, "get_llm_for_tier", lambda tier: _TwoSearches(False, answer, seen))
+    monkeypatch.setattr(
+        tools_mod,
+        "bind_tools_with_fallback",
+        lambda llm=None, tools=None: _TwoSearches(True, answer, seen),
+    )
+    pages = {
+        "q0": [_source(PIB, "Release", "2026-10-28"), _source(HINDU, "Story")],
+        "q1": [_source(HINDU + "/", "Story again"), _source(IE, "Explainer")],
+    }
+    monkeypatch.setitem(
+        tools_mod.TOOL_FUNCTIONS,
+        "web_search",
+        lambda query: ("raw text (ignored)", {"sources": pages[query]}),
+    )
+    app = tools_mod.build_tool_agent(checkpointer=checkpointer or InMemorySaver(), tools=[])
+    return app, seen
+
+
+def test_numbers_are_stable_across_two_searches_in_one_question(monkeypatch):
+    app, seen = _structured_agent(monkeypatch, "Notified [1]; analysed [2] and [3].")
+    result = _ask(app, "explain the new scheme", thread="s1")
+    tool_texts = seen[-1]
+    assert "[1] Release" in tool_texts[0] and "[2] Story" in tool_texts[0]
+    # second search: repeated Hindu URL keeps [2], the new page gets [3]
+    assert "[2] Story again" in tool_texts[1] and "[3] Explainer" in tool_texts[1]
+    answer = result["answer"]
+    assert f"[Release](<{PIB}>)" in answer and "28 Oct 2026" in answer
+    assert "**Official sources**" in answer and "**Secondary sources**" in answer
+    assert result["citations"][:3] == [
+        f"web [1] — {PIB}",
+        f"web [2] — {HINDU}",
+        f"web [3] — {IE}",
+    ]
+
+
+def test_answer_lists_only_cited_sources(monkeypatch):
+    app, _ = _structured_agent(monkeypatch, "Only this matters [3].")
+    answer = _ask(app, "q", thread="s2")["answer"]
+    assert "**[3]**" in answer
+    assert "**[1]**" not in answer and "**[2]**" not in answer
+
+
+def test_uncited_answer_lists_retrieved_sources_separately(monkeypatch):
+    app, _ = _structured_agent(monkeypatch, "An answer without references.")
+    answer = _ask(app, "q", thread="s3")["answer"]
+    assert "**Retrieved sources (not cited inline)**" in answer
+    assert "**Official sources**" not in answer
+    for n in (1, 2, 3):
+        assert f"**[{n}]**" in answer
+
+
+def test_artifacts_survive_checkpoint_and_next_question_starts_fresh(monkeypatch):
+    saver = InMemorySaver()
+    app, _ = _structured_agent(monkeypatch, "Cited [1].", checkpointer=saver)
+    _ask(app, "first question", thread="s4")
+    state = app.get_state({"configurable": {"thread_id": "s4"}}).values
+    tool_msgs = [m for m in state["messages"] if m.type == "tool"]
+    assert tool_msgs and all(m.artifact["sources"] for m in tool_msgs)
+    assert tool_msgs[0].artifact["sources"][0]["n"] == 1
+    # Next question: numbering restarts at [1] and old sources are not reused.
+    second = _ask(app, "second question", thread="s4")
+    assert second["citations"][0] == f"web [1] — {PIB}"
+    assert second["answer"].count("**[1]**") == 1

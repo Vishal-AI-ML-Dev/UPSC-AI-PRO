@@ -9,8 +9,10 @@ pipeline was removed in the P1 dual-stack merge.
 
 What remains here are the reusable helpers the rest of the stack still imports:
 
-* ``_fetch_search_context`` - trusted-source web-search digest, used by the
-  ``web_search`` tool (``src/graph/tools.py``) and the RAG subgraph.
+* ``_fetch_search_context`` - numbered live-search digest (structured search
+  lives in ``src/core/web_search.py``), used by the RAG subgraph.
+* ``_get_search_tool`` - the lazily-built Tavily tool used as the first
+  provider of that chain.
 * ``_build_student_context`` - formats a student profile for the mentor prompt,
   used by ``mentor_graph._mentor_context``.
 
@@ -32,15 +34,6 @@ TRUSTED_DOMAINS = [
     "indianexpress.com",
     "drishtiias.com",
 ]
-
-# Upper bound for one provider call. A hung Tavily request must not stall the
-# answer - on timeout we fall through to the keyless DuckDuckGo fallback.
-SEARCH_TIMEOUT_SECONDS = 10.0
-MAX_SEARCH_RESULTS = 4
-
-# Appended to every query to bias results towards UPSC/official sources.
-# Deliberately carries NO year: a hard-coded year goes stale and skews results.
-_QUERY_SUFFIX = " UPSC CSE official"
 
 _search_tool = None
 
@@ -85,94 +78,39 @@ def _get_search_tool():
     return _search_tool
 
 
-def _call_with_timeout(fn, timeout: float):
-    """Run ``fn()`` in a worker thread; raise ``TimeoutError`` past ``timeout``.
-
-    The worker is abandoned (not joined) on timeout so a hung provider can
-    never block the request path.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-    from concurrent.futures import TimeoutError as _FutureTimeout
-
-    pool = ThreadPoolExecutor(max_workers=1)
-    try:
-        return pool.submit(fn).result(timeout=timeout)
-    except _FutureTimeout as exc:
-        raise TimeoutError(f"search timed out after {timeout:g}s") from exc
-    finally:
-        pool.shutdown(wait=False)
-
-
-def _format_results(results, *, body_key: str, url_key: str) -> str:
-    """Render provider results as the "- title: snippet (Source: url)" digest."""
-    lines = []
-    for r in results or []:
-        if not isinstance(r, dict):
-            continue
-        url = (r.get(url_key) or "").strip()
-        if not url:
-            continue  # never emit an uncitable result
-        title = r.get("title", "") or ""
-        body = (r.get(body_key, "") or "")[:300]
-        lines.append(f"- {title}: {body} (Source: {url})")
-    return "\n".join(lines)
-
-
-def _tavily_search(question: str) -> str:
-    """Tavily digest, or "" when no key/tool. Raises on provider errors/timeouts."""
-    tool = _get_search_tool()
-    if not tool:
-        return ""
-    raw = _call_with_timeout(lambda: tool.invoke(question + _QUERY_SUFFIX), SEARCH_TIMEOUT_SECONDS)
-    results = raw.get("results", []) if isinstance(raw, dict) else (raw or [])
-    return _format_results(results, body_key="content", url_key="url")
-
-
 def _duckduckgo_search(question: str) -> str:
-    # Free, keyless fallback when Tavily is missing, fails, times out or
-    # returns nothing.
-    if not _web_search_enabled():
+    """Keyless DuckDuckGo digest (text search only); "" on failure or when disabled."""
+    from src.core import web_search
+
+    if not question or not web_search.web_search_enabled():
         return ""
     try:
-        from ddgs import DDGS
-    except ImportError:
-        logger.warning("ddgs not installed; DuckDuckGo fallback disabled. Run: uv add ddgs")
-        return ""
-    try:
-
-        def _run():
-            with DDGS(timeout=int(SEARCH_TIMEOUT_SECONDS)) as ddgs:
-                return ddgs.text(question + _QUERY_SUFFIX, max_results=MAX_SEARCH_RESULTS)
-
-        results = _call_with_timeout(_run, SEARCH_TIMEOUT_SECONDS)
-        return _format_results(results, body_key="body", url_key="href")
+        results = web_search.dedupe(
+            web_search._ddgs_text(question, web_search.PROVIDER_TIMEOUT_SECONDS)
+        )
     except Exception as e:
-        logger.warning(f"DuckDuckGo search failed: {e}")
+        logger.warning("DuckDuckGo search failed: %s", type(e).__name__)
         return ""
+    return web_search.format_digest(results[: web_search.MAX_RESULTS])
 
 
 def _web_search_enabled() -> bool:
-    from src.core.config import settings as _settings
+    from src.core.web_search import web_search_enabled
 
-    return bool(_settings.web_search_enabled)
+    return web_search_enabled()
 
 
 def _fetch_search_context(question: str) -> str:
-    """Live search digest: Tavily first, DuckDuckGo as the free fallback.
+    """Numbered live-search digest from the free-first provider chain.
 
-    DuckDuckGo runs whenever Tavily yields nothing usable - no API key, an
-    init/provider error, a timeout, or zero results. Returns "" when every
-    provider fails, so the caller can admit it has no live data.
+    See ``src/core/web_search.search_web``: Tavily (if configured) -> DDGS news
+    -> DDGS text -> Google News RSS -> PIB RSS, under one time budget. Returns
+    "" when search is disabled or every provider fails, so the caller can admit
+    it has no live data. Each entry keeps a "(Source: url)" marker.
     """
-    # WEB_SEARCH_ENABLED=false => neither Tavily nor DuckDuckGo is contacted.
-    if not _web_search_enabled():
-        return ""
-    try:
-        result = _tavily_search(question)
-    except Exception as e:
-        logger.warning(f"Tavily search failed: {e}")
-        result = ""
-    return result or _duckduckgo_search(question)
+    from src.core.web_search import format_digest, search_web
+
+    return format_digest(search_web(question))
 
 
 def _build_student_context(ctx: dict | None) -> str:

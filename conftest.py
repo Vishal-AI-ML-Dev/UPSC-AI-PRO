@@ -42,9 +42,35 @@ os.environ["JWT_SECRET"] = "test-secret-key-do-not-use-in-prod"
 os.environ["GOOGLE_API_KEY"] = ""
 os.environ["GROQ_API_KEY"] = ""
 os.environ["LANGFUSE_ENABLED"] = "false"
+# Live web search is OFF unless a test opts in (monkeypatching
+# settings.web_search_enabled), and no Tavily key is ever read from .env.
+os.environ["WEB_SEARCH_ENABLED"] = "false"
+os.environ["TAVILY_API_KEY"] = ""
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _offline_web_search(monkeypatch):
+    """Safety net: no test may reach a real search provider.
+
+    RSS fetches and the ``ddgs`` client fail closed by default; tests that
+    exercise a provider install their own fake, which overrides these.
+    """
+    import types
+
+    from src.core import web_search
+
+    def _blocked(*_args, **_kwargs):
+        raise OSError("network access is disabled in tests")
+
+    class _BlockedDDGS:
+        def __init__(self, *_args, **_kwargs):
+            raise OSError("network access is disabled in tests")
+
+    monkeypatch.setattr(web_search, "_http_get", _blocked)
+    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=_BlockedDDGS))
 
 
 @pytest.fixture(scope="session")

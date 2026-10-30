@@ -172,3 +172,49 @@ def test_tail_not_duplicated_when_stream_already_has_sources():
 
 def test_tail_empty_for_unrelated_answer_without_sources():
     assert unstreamed_tail("different answer", BODY) == ""
+
+
+# --------------------------------------------------------------------------- #
+# Structured Phase C block (numbered, clickable, dated) through the stream
+# --------------------------------------------------------------------------- #
+CITED_BODY = "The scheme was notified [1]."
+
+
+def _structured_graph():
+    from src.core.grounding import format_sources_block
+
+    source = {
+        "n": 1,
+        "url": "https://pib.gov.in/PressReleasePage.aspx?PRID=9",
+        "title": "Cabinet approves scheme",
+        "publisher": "Press Information Bureau",
+        "published": "2026-10-28",
+        "snippet": "",
+        "provider": "tavily",
+        "official": True,
+    }
+    block = format_sources_block(CITED_BODY, [source])
+
+    def agent(state):
+        model = GenericFakeChatModel(messages=iter([AIMessage(content=CITED_BODY)]))
+        return {"answer": model.invoke(state["question"]).content + block}
+
+    g = StateGraph(_State)
+    g.add_node("agent", agent)
+    g.add_edge(START, "agent")
+    g.add_edge("agent", END)
+    return g.compile(checkpointer=InMemorySaver()), block
+
+
+def test_structured_sources_reach_stream_and_cache(client, make_user, cache, monkeypatch):
+    graph, block = _structured_graph()
+    monkeypatch.setattr(client.app.state, "agent_graph", graph)
+    user = make_user("structured")
+    text = _post(client, user, CHAT, "What did the cabinet approve?", thread_id=uuid.uuid4().hex)
+    assert text == CITED_BODY + block
+    assert text.count(SOURCES_HEADER.strip()) == 1
+    assert "[Cabinet approves scheme](<https://pib.gov.in/PressReleasePage.aspx?PRID=9>)" in text
+    assert "Press Information Bureau · 28 Oct 2026" in text
+    assert "**Official sources**" in text
+    # The saved/cached answer is exactly what the client rendered.
+    assert cache.saved == [text.strip()]

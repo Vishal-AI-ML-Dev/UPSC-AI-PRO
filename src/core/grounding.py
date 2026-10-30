@@ -15,14 +15,24 @@ Two consumers share this module:
   ``format_sources`` to append deterministic "Sources used" notes to every
   answer that was grounded in a tool call.
 
-Everything here is pure Python (only ``re``): no network, no LLM, no heavy
-imports, so it runs in CI with no API keys.
+Structured web citations (Phase C): the mentor's ``web_search`` tool attaches
+``{"sources": [...]}`` as the ``ToolMessage.artifact``. Citations are built from
+that artifact - never parsed out of the untrusted text - numbered per user
+question, and rendered as a grouped "Sources used" block whose inline ``[n]``
+numbers match the answer. Messages without an artifact (older threads, plain
+string tools) fall back to the legacy "(Source: url)" extraction.
+
+Everything here is pure Python (only ``re`` and the stdlib-only
+``src.core.web_search`` helpers): no network, no LLM, no heavy imports, so it
+runs in CI with no API keys.
 """
 
 from __future__ import annotations
 
 import os as _os
 import re
+
+from src.core.web_search import SearchResult, display_date, url_key
 
 # Keep at most this many citations on any answer, so long tool runs do not
 # produce an unreadable wall of sources.
@@ -160,6 +170,10 @@ def citations_from_tool_messages(messages, *, max_items: int = MAX_CITATIONS) ->
         if not isinstance(content, str):
             content = str(content)
         if name == "web_search":
+            if _has_structured_sources(message):
+                # Structured provenance is handled by web_sources_from_tool_messages;
+                # never mine (untrusted) text when an artifact exists.
+                continue
             for citation in extract_web_citations(content, max_items=max_items):
                 if citation not in seen:
                     seen.add(citation)
@@ -220,6 +234,176 @@ def unstreamed_tail(final_answer, streamed) -> str:
     if idx != -1 and SOURCES_HEADER.strip() not in streamed:
         return final_answer[idx:]
     return ""
+
+
+# --- Structured web citations (ToolMessage artifacts) ----------------------
+def _structured_sources(message):
+    """The ``sources`` list from a web_search ToolMessage artifact, or None."""
+    artifact = getattr(message, "artifact", None)
+    if isinstance(artifact, dict) and isinstance(artifact.get("sources"), list):
+        return artifact["sources"]
+    return None
+
+
+def _has_structured_sources(message) -> bool:
+    return _structured_sources(message) is not None
+
+
+def _numbered(source) -> dict | None:
+    """Validate one artifact entry -> ``SearchResult`` dict plus integer ``n``."""
+    if not isinstance(source, dict):
+        return None
+    n = source.get("n")
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        return None
+    result = SearchResult.from_dict(source)
+    if result is None:
+        return None
+    return {**result.to_dict(), "n": n}
+
+
+def web_sources_from_tool_messages(messages) -> list:
+    """Numbered web sources from web_search artifacts, ordered by number.
+
+    Duck-typed (``.type`` / ``.name`` / ``.artifact``), offline-testable. Only
+    artifacts count - text inside a tool result can never create a citation.
+    """
+    by_n: dict = {}
+    for message in messages or []:
+        if getattr(message, "type", "") != "tool":
+            continue
+        if (getattr(message, "name", "") or "") != "web_search":
+            continue
+        for source in _structured_sources(message) or []:
+            entry = _numbered(source)
+            if entry and entry["n"] not in by_n:
+                by_n[entry["n"]] = entry
+    return [by_n[n] for n in sorted(by_n)]
+
+
+def number_web_sources(existing, sources) -> list:
+    """Give new web results numbers that are stable for the whole question.
+
+    ``existing`` are sources already numbered earlier in this user question; a
+    URL seen before keeps its number, a new URL gets the next free one.
+    Duplicates inside ``sources`` collapse to one entry.
+    """
+    by_key = {}
+    for s in existing or []:
+        key = url_key(s.get("url", "")) if isinstance(s, dict) else ""
+        if key and isinstance(s.get("n"), int):
+            by_key.setdefault(key, s["n"])
+    next_n = max(by_key.values(), default=0) + 1
+    out, used = [], set()
+    for source in sources or []:
+        result = SearchResult.from_dict(source)
+        if result is None:
+            continue
+        key = url_key(result.url)
+        n = by_key.get(key)
+        if n is None:
+            n, next_n = next_n, next_n + 1
+            by_key[key] = n
+        if n in used:
+            continue
+        used.add(n)
+        out.append({**result.to_dict(), "n": n})
+    return out
+
+
+_CITE_RE = re.compile(r"\[(\d{1,2}(?:\s*[,–-]\s*\d{1,2})*)\](?!\()")
+
+
+def cited_numbers(answer) -> list:
+    """Bracketed reference numbers used inline, e.g. "[1]", "[2, 3]", "[1-3]".
+
+    Markdown links ("[1](...)") are ignored. Returns sorted unique numbers.
+    """
+    found = set()
+    for match in _CITE_RE.finditer(answer or ""):
+        for part in match.group(1).split(","):
+            bounds = re.split(r"\s*[–-]\s*", part.strip())
+            try:
+                nums = [int(b) for b in bounds if b]
+            except ValueError:
+                continue
+            if len(nums) == 2 and 0 < nums[1] - nums[0] <= 10:
+                found.update(range(nums[0], nums[1] + 1))
+            else:
+                found.update(nums)
+    return sorted(n for n in found if n >= 1)
+
+
+_MD_SPECIAL_RE = re.compile(r"([\\`*_\[\]<>#|~])")
+
+
+def _md(text) -> str:
+    """Escape Markdown control characters in untrusted display text."""
+    return _MD_SPECIAL_RE.sub(r"\\\1", str(text or ""))
+
+
+def web_source_line(source: dict) -> str:
+    """One clickable Markdown line: number, title link, publisher, date."""
+    when = display_date(source.get("published", ""))
+    return (
+        f"- **[{source['n']}]** [{_md(source.get('title'))}](<{source['url']}>)"
+        f" — {_md(source.get('publisher'))} · {when}"
+    )
+
+
+def web_citation_label(source: dict) -> str:
+    """Plain-text label for ``state['citations']``."""
+    return f"web [{source['n']}] — {source['url']}"
+
+
+def _grouped(sources, official_label: str, secondary_label: str) -> list:
+    lines = []
+    official = [s for s in sources if s.get("official")]
+    secondary = [s for s in sources if not s.get("official")]
+    for label, group in ((official_label, official), (secondary_label, secondary)):
+        if group:
+            lines += ["", label] + [web_source_line(s) for s in group]
+    return lines
+
+
+def format_sources_block(answer, web_sources, other_citations=None) -> str:
+    """Grouped "Sources used" block for an answer built on structured web results.
+
+    * The answer cites ``[n]`` that match retrieved sources -> only those are
+      listed (original numbers kept), split into official / secondary.
+    * The answer cites none -> every retrieved source is listed under a clearly
+      labelled "Retrieved sources (not cited inline)" section, explicitly NOT
+      linked to specific statements.
+    * Inline numbers that match no retrieved source are flagged, never mapped.
+    * Knowledge-base / legacy citations follow under "Study material".
+    """
+    # Re-validate: publisher/official are recomputed from the URL, bad entries dropped.
+    web_sources = [e for e in (_numbered(s) for s in web_sources or []) if e]
+    other = [c for c in (other_citations or []) if c]
+    available = {s["n"]: s for s in web_sources}
+    cited = cited_numbers(answer)
+    matched = [available[n] for n in cited if n in available]
+    dangling = [n for n in cited if n not in available]
+    if not (web_sources or other or dangling):
+        return ""
+    lines = [SOURCES_HEADER]
+    if matched:
+        lines += _grouped(matched, "**Official sources**", "**Secondary sources**")
+    elif web_sources:
+        lines += [
+            "",
+            "**Retrieved sources (not cited inline)**",
+            "_These sources were retrieved for this question but are not linked "
+            "to specific statements above._",
+        ]
+        lines += _grouped(web_sources, "*Official*", "*Secondary*")
+    if dangling:
+        refs = ", ".join(f"[{n}]" for n in dangling)
+        verb = "does" if len(dangling) == 1 else "do"
+        lines += ["", f"_Note: {refs} {verb} not match any retrieved source._"]
+    if other:
+        lines += ["", "**Study material**"] + [f"- {_md(c)}" for c in other[:MAX_CITATIONS]]
+    return "\n".join(lines)
 
 
 # --- Citation honesty guard -------------------------------------------------
