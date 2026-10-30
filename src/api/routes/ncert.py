@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from src.agents.ncert.graph import (
+    NCERT_UNAVAILABLE_MESSAGE,
     ask_ncert,
     generate_study_session,
     get_chapters,
@@ -26,8 +27,11 @@ router = APIRouter(prefix="/ncert", tags=["NCERT"])
 
 @router.get("/classes", response_model=NCERTListResponse)
 async def list_classes():
-    """Get available NCERT classes."""
-    return {"items": get_classes()}
+    """Get available NCERT classes (``available`` is False when no PDFs are installed)."""
+    classes = get_classes()
+    if not classes:
+        return {"items": [], "available": False, "message": NCERT_UNAVAILABLE_MESSAGE}
+    return {"items": classes}
 
 
 @router.get("/subjects/{class_name}", response_model=NCERTListResponse)

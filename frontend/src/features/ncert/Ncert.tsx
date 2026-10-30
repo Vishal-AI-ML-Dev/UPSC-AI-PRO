@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { usePersistentState } from "../../lib/usePersistentState"
 import { api, streamAgent, type NcertSession } from "../../lib/api"
 import { Markdown } from "../../components/Markdown"
-import { Button, Card, Spinner } from "../../components/ui"
+import { Button, Card, EmptyState, Spinner } from "../../components/ui"
 import { Feedback } from "../../components/Feedback"
 
 // Server-generated (trusted) HTML for the mind map / question blocks. Kept in a
@@ -14,6 +14,7 @@ function RawHtml({ html }: { html: string }) {
 
 export function Ncert() {
   const [classes, setClasses] = useState<string[]>([])
+  const [unavailable, setUnavailable] = useState("")
   const [subjects, setSubjects] = useState<string[]>([])
   const [chapters, setChapters] = useState<string[]>([])
   const [cls, setCls] = usePersistentState("ncert:cls", "")
@@ -40,7 +41,13 @@ export function Ncert() {
   useEffect(() => {
     api
       .ncertClasses()
-      .then((r) => setClasses(r.items))
+      .then((r) => {
+        setClasses(r.items)
+        if (r.available === false)
+          setUnavailable(
+            r.message || "The NCERT library is not set up on this server yet.",
+          )
+      })
       .catch(() => {})
   }, [])
 
@@ -114,6 +121,12 @@ export function Ncert() {
           follow-up questions about the chapter.
         </p>
       </div>
+
+      {unavailable && (
+        <Card>
+          <EmptyState title="NCERT library not available" hint={unavailable} />
+        </Card>
+      )}
 
       <Card className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-3">

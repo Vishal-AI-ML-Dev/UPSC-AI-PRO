@@ -102,6 +102,9 @@ class NCERTChatRequest(BaseModel):
 
 class NCERTListResponse(BaseModel):
     items: list[str]
+    # False when no NCERT PDFs are installed; ``message`` then explains it.
+    available: bool = True
+    message: str | None = None
 
 
 # ─────────────────────────────────────────

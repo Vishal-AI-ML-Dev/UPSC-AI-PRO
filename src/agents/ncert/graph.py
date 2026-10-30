@@ -110,11 +110,21 @@ def detect_subject_area(subject: str, class_name: str = "", chapter: str = "") -
 # ─────────────────────────────────────────
 
 
+NCERT_UNAVAILABLE_MESSAGE = (
+    "The NCERT library is not set up on this server yet: no chapter PDFs are installed. "
+    "Other features are unaffected."
+)
+
+
 @lru_cache(maxsize=1)
 def get_classes() -> list[str]:
     """Get available NCERT classes."""
     if not os.path.exists(BASE):
-        logger.error(f"NCERT base directory not found: {BASE}")
+        logger.warning(
+            "NCERT base directory not found: %s. Place chapter PDFs as "
+            "<NCERT_DATA_DIR>/<class>/<subject>/<chapter>.pdf (or set NCERT_DATA_DIR).",
+            BASE,
+        )
         return []
     return sorted(os.listdir(BASE))
 

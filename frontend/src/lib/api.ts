@@ -221,6 +221,8 @@ export interface PlannerResult {
 
 export interface NcertList {
   items: string[]
+  available?: boolean
+  message?: string | null
 }
 export interface NcertSession {
   notes: string
