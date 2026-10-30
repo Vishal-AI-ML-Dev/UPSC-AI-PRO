@@ -281,6 +281,9 @@ def _should_seed_question(history: list, question) -> bool:
       * no question -> False
       * empty history -> True
       * just came back from a tool (last msg is a tool message) -> False
+      * the previous turn was already answered (a final AI message follows the
+        latest human message) -> True, even for an identical repeat question:
+        a retry is a new turn with its own tool budget
       * question already the latest human message -> False
       * otherwise -> True
     """
@@ -291,9 +294,33 @@ def _should_seed_question(history: list, question) -> bool:
     if _message_type(history[-1]) == "tool":
         return False
     for message in reversed(history):
-        if _message_type(message) == "human":
+        kind = _message_type(message)
+        if kind == "ai" and not getattr(message, "tool_calls", None):
+            return True
+        if kind == "human":
             return _content_to_text(getattr(message, "content", "")) != question
     return True
+
+
+def current_turn(messages) -> list:
+    """Messages belonging to the current user question.
+
+    Returns everything AFTER the latest human message (or the whole list when
+    there is none). On a checkpointed thread the message list holds every
+    earlier turn, so per-question bookkeeping - the tool-round budget and the
+    citations - must only look at this slice; otherwise earlier turns use up
+    the budget and their sources leak onto new answers.
+    """
+    msgs = list(messages or [])
+    for i in range(len(msgs) - 1, -1, -1):
+        if _message_type(msgs[i]) == "human":
+            return msgs[i + 1 :]
+    return msgs
+
+
+def tool_rounds(messages) -> int:
+    """Number of model tool-calling rounds in the CURRENT user question."""
+    return sum(1 for m in current_turn(messages) if getattr(m, "tool_calls", None))
 
 
 def to_tool_messages(results: list[dict]) -> list:
@@ -461,7 +488,9 @@ def build_tool_agent(
             human = HumanMessage(content=question)
             new_messages.append(human)
             history = history + [human]
-        rounds = sum(1 for m in history if getattr(m, "tool_calls", None))
+        # Budget is per user question: earlier turns on a checkpointed thread
+        # must not use it up (that silently disabled web search mid-thread).
+        rounds = tool_rounds(history)
         # At the loop cap, answer WITHOUT tools so we never terminate on a
         # dangling tool call with no final answer.
         active = model if rounds < max_tool_loops else base_model
@@ -481,11 +510,14 @@ def build_tool_agent(
             # Attribute the answer to the sources the model actually used
             # (web_search URLs / knowledge_base_search labels). Deterministic,
             # no extra LLM call - citations land on every grounded answer.
-            citations = citations_from_tool_messages(history)
+            # Only THIS question's tool results count: sources fetched for
+            # earlier turns on the thread must never be cited again.
+            turn = current_turn(history)
+            citations = citations_from_tool_messages(turn)
             # Honesty guard: only keep a KB source if the answer actually used
             # its content (prevents a strategy note being cited under an answer
             # the model wrote from its own knowledge).
-            citations = filter_kb_citations_by_overlap(answer, history, citations)
+            citations = filter_kb_citations_by_overlap(answer, turn, citations)
             if citations:
                 answer = answer + format_sources(citations)
             out["answer"] = answer
@@ -505,8 +537,8 @@ def build_tool_agent(
         last = msgs[-1] if msgs else None
         if last is None or not getattr(last, "tool_calls", None):
             return END
-        # Count how many tool-execution rounds already happened; stop at the cap.
-        rounds = sum(1 for m in msgs if getattr(m, "tool_calls", None))
+        # Count this question's tool-execution rounds; stop at the cap.
+        rounds = tool_rounds(msgs)
         if rounds > max_tool_loops:
             logger.warning("Tool loop cap (%s) reached; ending.", max_tool_loops)
             return END

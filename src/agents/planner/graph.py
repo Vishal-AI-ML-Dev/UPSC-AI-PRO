@@ -71,9 +71,12 @@ def _get_search_tool():
 def _duckduckgo_date_search(attempt_year: int) -> str:
     """Fallback: search DuckDuckGo for the prelims date when Tavily is unavailable."""
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
     except Exception:
-        return ""
+        try:
+            from duckduckgo_search import DDGS  # older package name
+        except Exception:
+            return ""
     try:
         query = f"UPSC CSE Prelims {attempt_year} exam date official notification upsc.gov.in"
         with DDGS() as ddgs:

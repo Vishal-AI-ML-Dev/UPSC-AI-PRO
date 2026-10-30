@@ -155,6 +155,13 @@ def test_no_seed_when_question_already_last_human():
     assert _should_seed_question(hist, "When is UPSC Prelims 2026?") is False
 
 
+def test_seed_repeated_question_after_completed_answer():
+    # A retry of the same question after it was answered is a NEW turn.
+    q = "When is UPSC Prelims?"
+    hist = [_FakeMsg("human", q), _FakeMsg("ai", "It is in May.")]
+    assert _should_seed_question(hist, q) is True
+
+
 # --- truthfulness guardrail: no fabricating dated facts when search fails ---
 def test_web_search_empty_query_is_safe():
     # Empty query never touches the network / heavy imports.

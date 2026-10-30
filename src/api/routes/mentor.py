@@ -20,6 +20,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
 
+from src.core.grounding import unstreamed_tail
 from src.graph.mentor_graph import build_mentor_graph
 from src.schemas import MentorRequest, MentorResponse
 
@@ -99,8 +100,15 @@ async def chat(request: MentorRequest):
     state = _build_state(request)
 
     def generate():
+        streamed = []
+        final_answer = ""
         try:
-            for chunk, metadata in graph.stream(state, stream_mode="messages"):
+            for mode, data in graph.stream(state, stream_mode=["messages", "values"]):
+                if mode == "values":
+                    if isinstance(data, dict) and data.get("answer"):
+                        final_answer = data["answer"]
+                    continue
+                chunk, metadata = data
                 if metadata.get("langgraph_node") != _ANSWER_NODE:
                     continue
                 # Only stream assistant tokens; skip the seeded human question
@@ -110,10 +118,21 @@ async def chat(request: MentorRequest):
                     continue
                 text = _chunk_text(getattr(chunk, "content", ""))
                 if text:
+                    streamed.append(text)
                     yield text
         except Exception:
             logger.exception("Mentor stream failed")
             yield "Something went wrong \u2014 please try again in a moment."
+            return
+        # The "Sources used" block is appended to the answer after the token
+        # stream ends; send it so citations reach the client.
+        if not streamed:
+            if final_answer:
+                yield final_answer
+            return
+        tail = unstreamed_tail(final_answer, "".join(streamed))
+        if tail:
+            yield tail
 
     return StreamingResponse(generate(), media_type="text/plain")
 

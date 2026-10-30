@@ -28,6 +28,9 @@ import re
 # produce an unreadable wall of sources.
 MAX_CITATIONS = 5
 
+# Opening line of the block ``format_sources`` appends to an answer.
+SOURCES_HEADER = "\n\nSources used:"
+
 # "(Source: https://...)" markers emitted by the web-search digest
 # (_fetch_search_context / _duckduckgo_search in src/agents/mentor/graph.py).
 _SOURCE_URL_RE = re.compile(r"\(Source:\s*(.*?)\)")
@@ -71,7 +74,7 @@ def format_sources(citations, *, max_items: int = MAX_CITATIONS) -> str:
     cleaned = [c for c in (citations or []) if c]
     if not cleaned:
         return ""
-    lines = ["\n\nSources used:"]
+    lines = [SOURCES_HEADER]
     for i, citation in enumerate(cleaned[:max_items], start=1):
         label = source_label(citation) if isinstance(citation, dict) else str(citation)
         lines.append(f"- {i}. {label}")
@@ -192,6 +195,31 @@ def compose_grounded_answer(
     if confidence is not None:
         text += format_trust_note(confidence, unsupported_claims or [])
     return text
+
+
+def unstreamed_tail(final_answer, streamed) -> str:
+    """Part of ``final_answer`` the client has NOT yet received via streaming.
+
+    Answer nodes stream the model's tokens, then append deterministic text
+    (the "Sources used" block, a trust note) to ``state['answer']`` without
+    streaming it. Streaming routes send this tail after the token stream so
+    citations reach the client and are saved with the answer.
+
+    * ``final_answer`` extends the streamed text -> the remainder.
+    * otherwise (e.g. the model streamed a preamble before a tool call) ->
+      the sources block, if the stream does not already contain one.
+    * nothing to add -> "".
+    """
+    final_answer = final_answer or ""
+    streamed = streamed or ""
+    if not final_answer:
+        return ""
+    if final_answer.startswith(streamed):
+        return final_answer[len(streamed) :]
+    idx = final_answer.rfind(SOURCES_HEADER)
+    if idx != -1 and SOURCES_HEADER.strip() not in streamed:
+        return final_answer[idx:]
+    return ""
 
 
 # --- Citation honesty guard -------------------------------------------------

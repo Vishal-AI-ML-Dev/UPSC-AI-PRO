@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from src.api.deps import get_current_user
 from src.api.stream_guard import guard_stream
 from src.core.config import settings
+from src.core.grounding import unstreamed_tail
 from src.core.llm import is_llm_timeout
 from src.core.response_cache import get_response_cache
 from src.graph.app_graph import make_config
@@ -155,6 +156,9 @@ def agent_chat_stream(
 
         streamed = False
         final_answer = ""
+        # The first "values" snapshot is the checkpointed state BEFORE this run,
+        # so its answer belongs to the previous turn and must never be re-sent.
+        prior_answer = None
         buffer = []
         try:
             for mode, data in agent_graph.stream(
@@ -171,7 +175,9 @@ def agent_chat_stream(
                             buffer.append(text)
                             yield text
                 elif mode == "values" and isinstance(data, dict):
-                    if data.get("answer"):
+                    if prior_answer is None:
+                        prior_answer = data.get("answer") or ""
+                    elif data.get("answer"):
                         final_answer = data["answer"]
         except Exception as exc:
             logger.exception("Agent stream invocation failed")
@@ -188,6 +194,14 @@ def agent_chat_stream(
         # captured from graph state so the user always receives a response.
         if not streamed and final_answer:
             yield final_answer
+        elif streamed:
+            # Text appended to the answer after token streaming (the "Sources
+            # used" block) is not part of the token stream - send it now so
+            # citations reach the client, its saved history and the cache.
+            tail = unstreamed_tail(final_answer, "".join(buffer))
+            if tail:
+                buffer.append(tail)
+                yield tail
 
         answer = ("".join(buffer)).strip() or final_answer
         _learn_from_question(store, user_id, profile, payload.question)

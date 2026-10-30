@@ -33,6 +33,15 @@ TRUSTED_DOMAINS = [
     "drishtiias.com",
 ]
 
+# Upper bound for one provider call. A hung Tavily request must not stall the
+# answer - on timeout we fall through to the keyless DuckDuckGo fallback.
+SEARCH_TIMEOUT_SECONDS = 10.0
+MAX_SEARCH_RESULTS = 4
+
+# Appended to every query to bias results towards UPSC/official sources.
+# Deliberately carries NO year: a hard-coded year goes stale and skews results.
+_QUERY_SUFFIX = " UPSC CSE official"
+
 _search_tool = None
 
 
@@ -76,23 +85,67 @@ def _get_search_tool():
     return _search_tool
 
 
+def _call_with_timeout(fn, timeout: float):
+    """Run ``fn()`` in a worker thread; raise ``TimeoutError`` past ``timeout``.
+
+    The worker is abandoned (not joined) on timeout so a hung provider can
+    never block the request path.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as _FutureTimeout
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        return pool.submit(fn).result(timeout=timeout)
+    except _FutureTimeout as exc:
+        raise TimeoutError(f"search timed out after {timeout:g}s") from exc
+    finally:
+        pool.shutdown(wait=False)
+
+
+def _format_results(results, *, body_key: str, url_key: str) -> str:
+    """Render provider results as the "- title: snippet (Source: url)" digest."""
+    lines = []
+    for r in results or []:
+        if not isinstance(r, dict):
+            continue
+        url = (r.get(url_key) or "").strip()
+        if not url:
+            continue  # never emit an uncitable result
+        title = r.get("title", "") or ""
+        body = (r.get(body_key, "") or "")[:300]
+        lines.append(f"- {title}: {body} (Source: {url})")
+    return "\n".join(lines)
+
+
+def _tavily_search(question: str) -> str:
+    """Tavily digest, or "" when no key/tool. Raises on provider errors/timeouts."""
+    tool = _get_search_tool()
+    if not tool:
+        return ""
+    raw = _call_with_timeout(lambda: tool.invoke(question + _QUERY_SUFFIX), SEARCH_TIMEOUT_SECONDS)
+    results = raw.get("results", []) if isinstance(raw, dict) else (raw or [])
+    return _format_results(results, body_key="content", url_key="url")
+
+
 def _duckduckgo_search(question: str) -> str:
-    # Free, keyless fallback when Tavily is unavailable or returns nothing.
+    # Free, keyless fallback when Tavily is missing, fails, times out or
+    # returns nothing.
     if not _web_search_enabled():
         return ""
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
     except ImportError:
+        logger.warning("ddgs not installed; DuckDuckGo fallback disabled. Run: uv add ddgs")
         return ""
     try:
-        lines = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(question + " UPSC CSE official", max_results=4):
-                title = r.get("title", "")
-                body = (r.get("body", "") or "")[:300]
-                href = r.get("href", "")
-                lines.append(f"- {title}: {body} (Source: {href})")
-        return chr(10).join(lines)
+
+        def _run():
+            with DDGS(timeout=int(SEARCH_TIMEOUT_SECONDS)) as ddgs:
+                return ddgs.text(question + _QUERY_SUFFIX, max_results=MAX_SEARCH_RESULTS)
+
+        results = _call_with_timeout(_run, SEARCH_TIMEOUT_SECONDS)
+        return _format_results(results, body_key="body", url_key="href")
     except Exception as e:
         logger.warning(f"DuckDuckGo search failed: {e}")
         return ""
@@ -105,27 +158,21 @@ def _web_search_enabled() -> bool:
 
 
 def _fetch_search_context(question: str) -> str:
+    """Live search digest: Tavily first, DuckDuckGo as the free fallback.
+
+    DuckDuckGo runs whenever Tavily yields nothing usable - no API key, an
+    init/provider error, a timeout, or zero results. Returns "" when every
+    provider fails, so the caller can admit it has no live data.
+    """
     # WEB_SEARCH_ENABLED=false => neither Tavily nor DuckDuckGo is contacted.
     if not _web_search_enabled():
         return ""
     try:
-        tool = _get_search_tool()
-        if not tool:
-            return ""
-        raw = tool.invoke(question + " UPSC CSE official 2026")
-        results = raw.get("results", []) if isinstance(raw, dict) else (raw or [])
-        if not results:
-            return _duckduckgo_search(question)
-        lines = []
-        for r in results:
-            title = r.get("title", "")
-            content = r.get("content", "")[:300]
-            url = r.get("url", "")
-            lines.append(f"- {title}: {content} (Source: {url})")
-        return "\n".join(lines)
+        result = _tavily_search(question)
     except Exception as e:
-        logger.warning(f"Search failed: {e}")
-        return ""
+        logger.warning(f"Tavily search failed: {e}")
+        result = ""
+    return result or _duckduckgo_search(question)
 
 
 def _build_student_context(ctx: dict | None) -> str:
