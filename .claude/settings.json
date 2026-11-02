@@ -17,9 +17,7 @@
     ],
     "ask": [
       "Edit(./migrations/**)",
-      "Write(./migrations/**)",
       "Edit(./.github/**)",
-      "Write(./.github/**)",
       "Edit(./Dockerfile)",
       "Edit(./frontend/Dockerfile)",
       "Edit(./docker-compose.yml)",
@@ -42,8 +40,6 @@
       "Read(./frontend/.env.*)",
       "Edit(./.env)",
       "Edit(./.env.*)",
-      "Write(./.env)",
-      "Write(./.env.*)",
       "Read(./**/*.pem)",
       "Read(./**/*.key)",
       "Read(./**/*.sqlite)",
