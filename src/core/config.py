@@ -278,13 +278,20 @@ class Settings(BaseSettings):
 
     # Background job queue (#10). Heavy work (PDF/lecture processing, notes,
     # vector indexing) runs OFF the request path. The default 'thread' backend
-    # needs NO extra infra and works on the free tier at Rs.0. Set REDIS_URL (a
-    # TCP rediss:// url) + run a worker (src/worker.py) to switch to 'rq'.
-    jobs_backend: str = "auto"  # auto | thread | rq | inline
+    # needs NO extra infra and works on the free tier at Rs.0. 'rq' is NOT
+    # implemented (there is no src/worker.py); redis_url / rq_queue_name are unused.
+    jobs_backend: str = "auto"  # auto | thread | inline
     redis_url: str = ""  # TCP Redis url for rq (rediss://...)
     rq_queue_name: str = "upsc-jobs"
-    job_max_retries: int = 1  # bounded retries on transient failure
-    job_timeout_seconds: int = 900  # per-job hard cap (rq worker)
+    # Thread backend (Phase 04, ADR-013): durable job STATE + stale-worker
+    # recovery, not resumable execution. A job whose process dies ends in
+    # 'error' ("please retry"); inputs are never persisted.
+    job_max_retries: int = 1  # extra attempts after a TRANSIENT failure only
+    job_timeout_seconds: int = 900  # job-level deadline -> terminal error, never retried
+    job_workers: int = 2  # worker threads per process
+    job_heartbeat_seconds: float = 30  # how often a process refreshes the jobs it holds
+    job_lease_seconds: float = 120  # queued/running with no heartbeat this long = stale
+    job_retry_backoff_seconds: float = 5  # wait = backoff x attempt between retries
 
     # --- A/B prompt experiments (#12) ---
     experiments_enabled: bool = True  # master switch; control arm keeps todays prompt

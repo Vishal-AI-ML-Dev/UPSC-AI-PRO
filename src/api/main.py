@@ -32,12 +32,13 @@ from src.api.security_headers import (
     TimeoutMiddleware,
 )
 from src.api.upload_limit import MaxUploadSizeMiddleware
-from src.core import observability
+from src.core import job_queue, observability
 from src.core.config import settings
 from src.core.db import init_db
 from src.core.email_utils import check_email_config, smtp_configured
 from src.core.error_monitoring import init_sentry, sentry_enabled
 from src.core.job_handlers import register_all
+from src.core.llm import describe_exception
 from src.core.logging_config import setup_logging
 from src.core.token_cleanup import purge_expired_tokens
 from src.core.vector_store import ensure_vector_storage
@@ -91,8 +92,8 @@ async def lifespan(app: FastAPI):
         purge_expired_tokens()
     except Exception:
         logger.warning("Startup token cleanup skipped", exc_info=True)
-    # Register background job handlers so the web process and any worker can
-    # execute enqueued jobs. Import + registration are required (no fail-open).
+    # Recover jobs whose owning process died (lease expired). Live jobs of a
+    # sibling worker keep a fresh heartbeat and are never touched (ADR-013).
     register_all()
     ensure_vector_storage()
     # Build the LangGraph supervisor once (checkpointer + long-term store wired)
@@ -107,6 +108,13 @@ async def lifespan(app: FastAPI):
         )
     yield
     logger.info("\U0001f44b Shutting down...")
+    # Cancel jobs that never started and fail their rows so pollers get a
+    # definitive answer. Running jobs keep their heartbeat until they finish
+    # (the heartbeat thread then exits) or expire by lease if the process dies.
+    try:
+        job_queue.shutdown()
+    except Exception as e:
+        logger.warning("Job queue shutdown failed: %s", describe_exception(e))
     observability.flush()  # push any pending Langfuse traces
     close_memory()  # release LangGraph DB pools cleanly
 

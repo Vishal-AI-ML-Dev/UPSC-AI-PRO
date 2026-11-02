@@ -57,7 +57,10 @@ async def upload_pdf(
             logger.error("Upload processing failed: %s", describe_exception(e))
             raise HTTPException(status_code=500, detail=GENERIC_ERROR) from None
 
-    job_id = enqueue("upload_process", _work, user_id=user_id)
+    # retries=0: the only transient failure here is a partial vector upsert, and a
+    # retry would reuse that partly written collection and report success
+    # (Phase 04, Amendment 1). Non-retryable until the index build is retry-safe.
+    job_id = enqueue("upload_process", _work, user_id=user_id, retries=0)
     return {"job_id": job_id, "status": "queued"}
 
 

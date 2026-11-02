@@ -131,3 +131,54 @@ Append new ADRs; never rewrite accepted ones — supersede them.
   - Numbers are labelled SYNTHETIC, local and single-worker, and must not be cited as production performance.
   - Render latency, real LLM latency and production throughput stay UNVERIFIED until measured.
   - Absolute values vary with machine state; only before/after direction is robust.
+
+## ADR-013 — Thread-backed jobs with a heartbeat lease: durable job state, not resumable execution
+2026-11-02 · Accepted (Phase 04; user decisions Q1–Q5, safeguards S1–S8, plan Amendments 1–2)
+- **Context:**
+  - Every process boot failed **all** `queued`/`running` jobs, including those a sibling worker was running.
+  - Status writes were unconditional, so a late result could overwrite a reaped job.
+  - `job_max_retries` / `job_timeout_seconds` were never read, and the executor was never shut down.
+  - Inputs (PDF bytes up to `MAX_UPLOAD_MB`, URLs, transcripts) live only in closures. Render free has no disk.
+- **Decision:**
+  - **Backend:** stay thread-backed (`src/core/job_queue.py`). No broker, no new dependency.
+  - **No schema change:** the lease uses the existing `jobs.updated_at` column.
+  - **Lease:**
+    - A daemon heartbeat refreshes `updated_at` every `JOB_HEARTBEAT_SECONDS` (30), only for the job ids this process
+      holds.
+    - A queued/running row with no refresh for `JOB_LEASE_SECONDS` (120, clamped to > 2× heartbeat), or a NULL
+      `updated_at`, is stale.
+    - Recovery fails only stale rows, at boot, on each tick, and on read in `get_job` (owner only).
+    - The heartbeat thread exits when the process holds no jobs.
+  - **Writes:** every status transition is a conditional UPDATE (`WHERE status IN …`). Late outcomes are discarded.
+  - **Retries:**
+    - Only an explicit allow-list counts as transient: `TimeoutError`/`ConnectionError`, the httpx
+      timeout/network/remote-protocol errors, SQLAlchemy `OperationalError`/`DisconnectionError`, and HTTP-like status
+      408/429/5xx through explicit `__cause__` only.
+    - Never retried: a `UserFacingError`, an `HTTPException`, or anything raised from either.
+    - Retries run sequentially in the same thread, capped at `MAX_RETRIES = 3`.
+    - A retry is refused if it could not start before the deadline, and re-checked after the backoff.
+    - Non-idempotent work opts out with `retries=0`: PYQ bank (S6), and PDF upload (Amendment 1, because a
+      partial vector upsert would be accepted).
+  - **Deadline:** `JOB_TIMEOUT_SECONDS` fails the job with a fixed message and is never retried. Threads cannot be
+    killed, so the outcome of the still-running thread is discarded.
+  - **Shutdown (Amendment 2, user-approved):**
+    - Jobs that never started are cancelled and failed.
+    - Retry backoffs are interrupted.
+    - Running jobs keep their heartbeat until they complete. If the process is killed, they expire by lease.
+  - **No resume (Q1):** a job whose process dies ends as `error` ("Server restarted … Please retry."). Inputs are
+    never persisted.
+- **Consequences:**
+  - Each process heartbeats only its own jobs, so a live job is never failed while its process is alive.
+  - A dead worker's jobs are reported failed about lease to lease+heartbeat after the last beat (120–150 s at
+    defaults; measured 0.88–1.15 leases in `scripts/bench_jobs.py`).
+  - Single-process restarts no longer fail jobs instantly. Pollers see the error after the lease.
+  - Lease correctness assumes the clocks of the processes involved agree within `lease − 2×heartbeat`.
+  - Known limits (backlog):
+    - no deadline for queued jobs;
+    - a timed-out thread keeps its worker slot;
+    - no per-user job cap;
+    - PYQ append and partial `create_vector_store` are not idempotent;
+    - Postgres comparison UNVERIFIED.
+  - New settings `JOB_WORKERS`, `JOB_HEARTBEAT_SECONDS`, `JOB_LEASE_SECONDS`, `JOB_RETRY_BACKOFF_SECONDS` (safe
+    defaults in `src/core/config.py`). The user documents them as commented placeholders in `.env.example`, which
+    Claude is not permitted to read or edit.

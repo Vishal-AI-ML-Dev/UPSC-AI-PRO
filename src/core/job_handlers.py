@@ -1,10 +1,13 @@
 """Background-job startup hook.
 
 The thread-backed queue in ``job_queue`` executes closures directly, so there
-is no per-type handler registry to populate. What startup DOES need is to clear
-out jobs left queued/running by a previous (crashed or spun-down) process, so
+is no per-type handler registry to populate. What startup DOES need is to fail
+jobs left queued/running by a process that died (crashed or spun down), so
 clients polling those ids get a definitive ``error`` rather than a stuck
-spinner. ``register_all`` is the hook the app lifespan already calls.
+spinner. Recovery is lease-based (Phase 04, ADR-013): only rows whose heartbeat
+expired are failed, so a sibling worker's live jobs are never touched. Jobs are
+not resumed (inputs are not persisted). ``register_all`` is the hook the app
+lifespan already calls.
 """
 
 import logging
@@ -18,4 +21,4 @@ def register_all() -> None:
 
     reaped = reap_stale_jobs()
     if reaped:
-        logger.info("Reaped %d stale background job(s) from a previous run", reaped)
+        logger.info("Recovered %d stale background job(s) (lease expired)", reaped)

@@ -9,8 +9,8 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | 00 | Engineering workspace setup | DONE (2026-11-02) — `docs/phase-reports/phase-00-report.md` |
 | 01 | Baseline & safety net | DONE (2026-11-02) — `docs/phase-reports/phase-01-report.md` |
 | 02 | Security & ownership | DONE (2026-11-02) — `docs/phase-reports/phase-02-report.md` |
-| 03 | Request-path performance | DONE (2026-11-02; not committed) — `docs/phase-reports/phase-03-report.md` |
-| 04 | Durable jobs | **NEXT** — spec STUB `.claude/specs/phase-04-durable-jobs.md` (do not start without the user) |
+| 03 | Request-path performance | DONE (2026-11-02; commit `2ac904e`) — `docs/phase-reports/phase-03-report.md` |
+| 04 | Durable jobs | DONE (2026-11-02) — `docs/phase-reports/phase-04-report.md` |
 | 05–09 | See `.claude/specs/README.md` | STUB |
 
 ## The 8 workflows (must not regress)
@@ -18,14 +18,15 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 |---|---|---|---|
 | AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close) |
 | NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed) |
-| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02; parse/bank status/clear off the event loop, bank `sync=true` offloaded (Phase 03) (Phase 03 close) |
+| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02; parse/bank status/clear off the event loop, bank `sync=true` offloaded (Phase 03); bank upload job: heartbeat lease, deadline, no auto-retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close) |
 | Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02; `*/sync` endpoints off the event loop (Phase 03) (Phase 03 close) |
 | Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed) |
 | Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke PASS 2026-11-02; `generate/sync` off the event loop (Phase 03) (Phase 03 close) |
-| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02; `process`/`process-text` off the event loop (Phase 03) (Phase 03 close) |
-| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02; upload `sync=true` offloaded (Phase 03) (Phase 03 close) |
+| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02; `process`/`process-text` off the event loop (Phase 03); lecture jobs: heartbeat lease, deadline, 1 transient retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close) |
+| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02; upload `sync=true` offloaded (Phase 03); upload job: heartbeat lease, deadline, no auto-retry (Phase 04 Amendment 1); offline smoke PASS 2026-11-02 (Phase 04 close) |
 
-Test suite status (2026-11-02, Phase 03 close): `1113 passed, 13 warnings in 112.29s (0:01:52)` (Phase 02 close: `1086 passed`;
+Test suite status (2026-11-02, Phase 04 close): `1182 passed, 13 warnings in 128.48s (0:02:08)` (Phase 03 close: `1113 passed`;
+Phase 02 close: `1086 passed`;
 Phase 01 close: `930 passed`).
 Engineering metrics (synthetic request-path benchmark, how to rerun, UNVERIFIED production metrics):
 `docs/ENGINEERING_METRICS.md`; harness `scripts/bench_request_path.py` + `scripts/bench_server.py`.
@@ -44,7 +45,9 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 - LLM chains: Gemini 2.5 flash / flash-lite with Groq fallback (`src/core/llm.py`). Embeddings: Gemini, 768-dim.
 - Vectors: one Qdrant collection per `persist_key` (`src/core/vector_store.py`). Chroma fallback broken
   (`langchain_chroma` not installed).
-- Jobs: in-process `ThreadPoolExecutor(2)`, DB-persisted status only (`src/core/job_queue.py`).
+- Jobs: in-process thread pool (`JOB_WORKERS`, default 2), DB-persisted status; heartbeat lease on `jobs.updated_at`,
+  lease-based recovery, conditional transitions, transient-only retries, deadline; inputs not persisted (no resume) —
+  `src/core/job_queue.py`, ADR-013.
 - Checkpointer/store: Postgres when `DATABASE_URL` is Postgres; else SQLite checkpointer + in-memory store.
 - Jev / TypeSafe: not present anywhere in the repository.
 
@@ -53,7 +56,7 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 |---|---|---|---|
 | 1 | ~~No ownership at vector boundary; LLM-chosen `persist_key`; global upload collections~~ CLOSED Phase 02 (ADR-007); legacy collections remain (cleanup backlog) | HIGH | 02 ✓ |
 | 2 | Blocking work in `async def` handlers (single worker) → CLOSED Phase 03 (ADR-011: 18 handlers → `def`, upload sync branches + Upstash check offloaded, allow-list test). Threadpool (40) capacity risk accepted (Q2, backlog MED) | HIGH | 03 ✓ |
-| 3 | Non-durable jobs; boot reaper fails sibling workers' jobs | HIGH/MED | 04 |
+| 3 | ~~Boot reaper fails sibling workers' jobs; no retry/timeout/shutdown~~ CLOSED Phase 04 (ADR-013: lease + heartbeat, guarded transitions, transient retries, deadline, graceful shutdown). Jobs are still not resumable after a process dies (accepted, Q1); queued-job deadline / per-user cap in backlog | HIGH/MED | 04 ✓ |
 | 4 | Vector stack fails without Qdrant (Chroma not installed) | HIGH (misconfig) | 06 |
 | 5 | Unbounded inputs → CLOSED Phase 02 (field + 1 MiB body limits, ADR-009); checkpoint history growth: mentor *prompt* bounded in Phase 03 (6 earlier turns); stored checkpoint still grows | MED | 03 (prompt ✓) / later (storage) |
 | 6 | Auth rate limit → CLOSED Phase 02 (ADR-010, refresh excluded); account enumeration (register message, no dummy bcrypt) still open | MED | backlog |
@@ -130,25 +133,61 @@ All items below were corrected in place; claim → evidence table in `docs/phase
 - (Phase 03) Benchmark showed the emoji startup logs raise `UnicodeEncodeError` tracebacks on a cp1252 console on
   every log call (see existing emoji backlog item) — confirms that item; LOW.
 
+- (Phase 04) PYQ bank append is not idempotent: `src/agents/pyq/graph.py:build_question_bank` →
+  `src/core/vector_store.py:upsert_documents` (`store.add_documents(docs)`, no ids), so re-running duplicates chunks.
+  `pyq_bank_upload` uses `retries=0` until fixed — MED.
+- (Phase 04) `src/core/vector_store.py:create_vector_store` returns any populated collection as-is, so a partial upsert
+  stays partial on re-run. `upload_process` uses `retries=0` (Amendment 1). The lecture chat index has the same partial
+  behaviour (best effort) — MED.
+- (Phase 04, security L3) No per-user active-job cap. The executor queue is unbounded and holds upload bytes in closures.
+  A timed-out job's thread keeps a `job_workers` slot until it returns (threads can't be killed) — MED.
+- (Phase 04, review round 2 S2) A queued job has no deadline of its own, and a timed-out job's thread keeps its
+  worker slot. If every `job_workers` slot is held by a hung dependency call, queued jobs stay `queued` (heartbeated,
+  so never recovered) until a slot frees or the process exits. The frontend gives up after 10 min. Fix: fail queued
+  jobs older than `job_timeout_seconds` in `_tick`, or stop heartbeating them — MED.
+- (Phase 04, security L1) `src/core/job_queue.py:get_job` lets any authenticated user read a job row with
+  `user_id IS NULL` (no production caller creates one; recovery-on-read is now owner-only) — LOW.
+- (Phase 04) `_is_transient` counts every `sqlalchemy.exc.OperationalError` as transient, including permanent ones
+  such as "no such table" (one wasted retry) — LOW.
+- (Phase 04) The job lease compares the wall clocks of different processes. On multiple hosts, clock skew above
+  `lease - 2*heartbeat` (60 s at defaults) could fail a live job. Postgres timestamptz comparison is UNVERIFIED (tests
+  use SQLite) — LOW.
+- (Phase 04, Q5) `.env.example` placeholders for `JOB_WORKERS`, `JOB_HEARTBEAT_SECONDS`, `JOB_LEASE_SECONDS`,
+  `JOB_RETRY_BACKOFF_SECONDS` were approved, but Claude's permission rules deny reading/editing `.env.example`. The user
+  added them by hand at Phase 04 close. Claude could not read the content; it passed `git diff --check`. The user should
+  confirm the exact lines — LOW.
+
 ### Last handoff — 2026-11-02
-- Active phase: none in progress. Phase 03 Request-path performance — DONE (spec DONE, plan DONE incl. Amendments 1–2;
-  report `docs/phase-reports/phase-03-report.md`; ADR-011, ADR-012). Next: Phase 04 Durable jobs — spec STUB, plan none;
-  not started (wait for the user).
-- Done this session: Phase 03 end to end. 18 handlers `async def` → `def` (`src/api/routes/{auth,evaluator,experiments,
-  feedback,history,jobs,lecture,planner,progress,pyq}.py`); upload/PYQ-bank `sync=true` offloaded (`upload.py`, `pyq.py`);
-  Upstash check on a dedicated `anyio.CapacityLimiter(8)` (`src/api/rate_limit.py`); lock + `uses_redis()`
-  (`src/api/rate_limit_core.py`); `bound_history` (`src/graph/tools.py`) + `mentor_history_max_turns=6`
-  (`src/core/config.py`); tests `tests/test_async_routes.py` (13), `tests/test_mentor_history_bound.py` (14); benchmark
-  harness `scripts/bench_request_path.py`, `scripts/bench_server.py`; canonical `docs/ENGINEERING_METRICS.md`; five
-  review rounds; ADR-011/012 in `docs/DECISIONS.md`. Removed the four leftover benchmark temp dirs outside the repo
-  (`%TEMP%\upsc_bench_run_{27f861o5,9efaz048,d2jwapfb,u57nfjq0}`), each inspected first and deleted by exact path.
-- Verified: `uv run pytest -q` → `1113 passed, 13 warnings in 112.29s (0:01:52)`; `uv run ruff check src tests` →
-  `All checks passed!`; compileall exit 0; focused tests 5× `63 passed`; `git diff --check` exit 0; benchmark reproducibility
-  run (documented command) 8 rows, 0 errors; reviews 0 BLOCKING / 0 SHOULD-FIX.
-  Not verified: live smoke; Render latency, real LLM latency, production throughput; production Upstash/Render config;
-  root cause of one one-off test hang (helper fixed; not reproduced since).
-- In progress / next step: user reviews and (if wanted) commits Phase 03; then `/start-phase 4` when the user asks.
-- Open questions for the user: none.
-- Uncommitted changes: 17 modified (`src/` 15 files, spec, `docs/PROJECT_STATE.md`) + `docs/DECISIONS.md`,
-  `.claude/specs/README.md`; 7 untracked (plan, report, `docs/ENGINEERING_METRICS.md`, 2 scripts, 2 test files).
-  Nothing committed or pushed.
+- Active phase: none in progress. Phase 04 Durable background jobs — DONE (spec DONE, plan DONE with Amendments 1–2
+  approved by the user; report `docs/phase-reports/phase-04-report.md`; ADR-013). Next: Phase 05 — spec STUB; not
+  started (wait for the user).
+- Done this session:
+  - Phase 04 end to end, test-first, with pre-fix failures recorded in the report.
+  - `src/core/job_queue.py` (heartbeat lease, lease-based and owner-only on-read recovery, conditional transitions,
+    transient allow-list, retry capped at 3, deadline, graceful shutdown that keeps running jobs heartbeated).
+  - `config.py` (4 settings), `job_handlers.py`, `src/api/main.py` (lifespan shutdown).
+  - `routes/pyq.py` and `routes/upload.py`: `retries=0`.
+  - `tests/test_job_queue_durability.py` (69 tests).
+  - `scripts/bench_jobs.py`; `docs/ENGINEERING_METRICS.md` (jobs section); ADR-013; report.
+  - Two review rounds per reviewer.
+  - The user added the `.env.example` placeholders by hand.
+- Verified:
+  - `uv run pytest -q` → `1182 passed, 13 warnings in 128.48s (0:02:08)` (also 125.24 s and 126.66 s runs).
+  - focused → `215 passed, 3 warnings in 41.05s`.
+  - `ruff check src tests` and `ruff check scripts/bench_jobs.py` → `All checks passed!`. compileall exit 0.
+    `git diff --check` exit 0.
+  - `scripts/bench_jobs.py` → `ALL PASS: True` (5 runs).
+  - All 14 ACs MET.
+- Not verified:
+  - `.env.example` content: reading or diffing it is denied to Claude.
+  - Postgres lease comparison; Render deploy overlap; `WEB_CONCURRENCY>1` under HTTP load; live smoke.
+  - Frontend build (frontend unchanged).
+- In progress / next step: the user confirms `.env.example` with `git diff -- .env.example`, reviews and (if wanted)
+  commits Phase 04; then `/start-phase 5` when the user asks.
+- Open questions for the user: none (only the `.env.example` self-check above).
+- Uncommitted changes:
+  - Modified: `.env.example` (by the user), `src/` 6 files, spec, `.claude/specs/README.md`,
+    `docs/{DECISIONS,ENGINEERING_METRICS,PROJECT_STATE}.md`.
+  - Untracked: plan, `docs/phase-reports/phase-04-report.md`, `scripts/bench_jobs.py`,
+    `tests/test_job_queue_durability.py`.
+  - Nothing committed or pushed.

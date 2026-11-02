@@ -15,8 +15,10 @@ linked phase report; if it was not measured, it is marked **UNVERIFIED**.
 | Real LLM latency (Gemini / Groq) | **UNVERIFIED** — never measured | — |
 | Production throughput / capacity | **UNVERIFIED** — never measured | — |
 | Real Upstash RTT; whether Upstash is configured in production | **UNVERIFIED** | — |
-| Memory / CPU per request, multi-worker behaviour | **UNVERIFIED** | — |
-| Offline test suite size | `1113 passed` (Phase 03 verification run) | [phase-03 report](phase-reports/phase-03-report.md#gate-results-final-run-verbatim) |
+| Memory / CPU per request, multi-worker HTTP behaviour | **UNVERIFIED** | — |
+| Background-job reliability: false reaps, dead-job recovery time, heartbeat tick cost, retry policy (offline, multi-process, SQLite) | Measured (Phase 04) | [§ Background-job reliability benchmark](#background-job-reliability-benchmark-offline-multi-process-sqlite) |
+| Background jobs on Postgres / Render with `WEB_CONCURRENCY>1` | **UNVERIFIED** — never measured | — |
+| Offline test suite size | `1182 passed` (Phase 04 close run) | [phase-04 report](phase-reports/phase-04-report.md#gate-results-final-run-verbatim) |
 
 **Do not cite the synthetic numbers as production performance.** They show how the request path behaves when work
 blocks (queueing, event-loop stalls, the Upstash thread budget), on one machine, with fake dependencies.
@@ -128,3 +130,54 @@ runs with the committed harness. The report has every percentile.
 - **D (Upstash 200 ms):** throughput went from 4.88–5.0 to 39.1–39.4 req/s.
   - That is just under the 8-thread budget's ceiling of 8 ÷ 0.2 s = 40 req/s.
   - `/health` p50 went from 4.14–4.21 s to 4.8–5.8 ms.
+
+## Background-job reliability benchmark (offline, multi-process, SQLite)
+Harness: `scripts/bench_jobs.py` (Phase 04). It starts **real separate OS processes** that share one throwaway SQLite
+file, which is what two uvicorn workers would share. Isolation is the same as `bench_server.py`: an allow-listed
+environment, offline settings, and a `chdir` into a fresh temp dir so no `.env` is read. No network and no keys. The
+temp dir is deleted after a passing run.
+
+Scenarios:
+- **A** — worker A runs 8 live jobs lasting 4 leases while sibling B re-runs boot recovery (`register_all`) every
+  ¼ lease. The run passes only with 0 false reaps.
+- **B1** — worker C holds 8 jobs (4 running, 4 queued) and is killed with `os._exit`. We measure the time until every
+  job is `error`, recovered by a live sibling's periodic heartbeat sweep.
+- **B2** — the same kill, recovered lazily by `get_job` polling, with no sibling running.
+- **C** — the cost of one heartbeat tick with 1, 10 or 50 held jobs.
+- **D** — 50 jobs per case: transient-once, permanent, and `retries=0`.
+
+Timings are **scaled down**: heartbeat 0.2 s and lease 1.0 s (production defaults are 30 s and 120 s). Recovery
+time is reported as a multiple of the lease.
+
+```bash
+uv run python scripts/bench_jobs.py                                   # defaults: --heartbeat 0.2 --lease 1.0 --jobs 8
+uv run python scripts/bench_jobs.py --out <path outside the repo>.json
+```
+
+### Recorded results
+2026-11-02, Phase 04 final working tree (after review fixes), Windows 11, Python 3.13.13, SQLite local file. Two runs:
+
+| Scenario | Run 1 | Run 2 |
+|---|---|---|
+| A sibling boot (8 live jobs × 4 leases) | 16 sibling boot recoveries, **0 false reaps**, 8/8 `done` | 14 recoveries, **0 false reaps**, 8/8 `done` |
+| B1 dead worker, periodic sweep (4 running + 4 queued) | 8/8 recovered, max 0.99 s (**0.99 leases**) | 8/8, max 1.03 s (1.03 leases) |
+| B2 dead worker, lazy `get_job` | 8/8 recovered, max 1.07 s (**1.07 leases**) | 8/8, max 1.06 s (1.06 leases) |
+| C heartbeat tick, median / p95 ms (1 / 10 / 50 held) | 7.0 / 7.1 / 7.6; 8.1 / 9.6 / 11.7 | 7.2 / 7.0 / 7.6; 7.8 / 7.8 / 8.9 |
+| D retry policy (50 jobs per case) | transient-once → 2 attempts, `done`; permanent → 1; `retries=0` → 1 | same |
+
+Both runs: `ALL PASS: True`. Run 3, after the review round-2 fixes (submit-failure handling, `HTTPException` never
+transient): A 0 false reaps over 16 recoveries; B1/B2 max 0.88 / 0.88 leases; C median 7.0 / 6.9 / 7.7 ms; D unchanged;
+`ALL PASS: True`. Two earlier runs on the pre-review code gave the same pass/fail results (B1/B2 max
+0.87–1.15 leases). Recovery time varies with where the crash falls in the heartbeat cycle. Its upper bound is about
+lease + heartbeat.
+
+What this means at production defaults (an inference from the scaled run, not measured): a dead worker's jobs are
+reported failed about 120–150 s after its last heartbeat. A live job is never failed while its process
+heartbeats. One tick costs roughly one batched UPDATE plus one sweep on SQLite every 30 s.
+
+Before the fix, a probe against the pre-Phase-04 code gave these results (phase-04 report → test-first evidence):
+- One `reap_stale_jobs()` call failed a live, just-started job.
+- The late result then overwrote that `error` with `done`.
+- A transient `LLMTimeoutError` was not retried.
+
+Postgres, real Render deploy overlap and `WEB_CONCURRENCY>1` under HTTP load are **UNVERIFIED**.

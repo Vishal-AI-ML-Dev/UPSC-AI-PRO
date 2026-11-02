@@ -99,7 +99,9 @@ async def bank_upload(
             logger.error("PYQ bank upload failed: %s", describe_exception(e))
             raise HTTPException(status_code=500, detail=GENERIC_ERROR) from None
 
-    job_id = enqueue("pyq_bank_upload", _work, user_id=user_id)
+    # retries=0: the bank append is not idempotent (chunks have no ids), so an
+    # automatic retry could duplicate questions (Phase 04, S6).
+    job_id = enqueue("pyq_bank_upload", _work, user_id=user_id, retries=0)
     return {"job_id": job_id, "status": "queued"}
 
 

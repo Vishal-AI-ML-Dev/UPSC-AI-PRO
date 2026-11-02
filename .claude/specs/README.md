@@ -14,7 +14,7 @@ One spec per phase, named `phase-NN-<slug>.md`, created from `_TEMPLATE.md`.
 | 01 | `phase-01-baseline-safety-net.md` | DONE (2026-11-02) |
 | 02 | `phase-02-security-ownership.md` | DONE (2026-11-02) |
 | 03 | `phase-03-request-path-performance.md` | DONE (2026-11-02) |
-| 04 | `phase-04-durable-jobs.md` | STUB |
+| 04 | `phase-04-durable-jobs.md` | DONE (2026-11-02) |
 | 05 | `phase-05-agent-architecture.md` | STUB |
 | 06 | `phase-06-rag-quality.md` | STUB |
 | 07 | `phase-07-product-gaps.md` | STUB |
