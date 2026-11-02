@@ -2,14 +2,21 @@
 Upload routes - PDF processing and chat
 """
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import logging
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from src.agents.upload.graph import ask_upload, process_upload
 from src.api.deps import get_current_user
 from src.api.stream_guard import guard_stream
+from src.api.upload_limit import read_pdf_upload
+from src.core.errors import GENERIC_ERROR, UserFacingError
 from src.core.job_queue import enqueue
-from src.schemas import ChatRequest
+from src.core.llm import describe_exception
+from src.schemas import PDF_HASH_PATTERN, ChatRequest
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
@@ -26,14 +33,12 @@ async def upload_pdf(
     returns a job id to poll (GET /jobs/{id}). Pass ``?sync=true`` to run it
     inline and get the notes back directly in the response.
     """
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
-    content = await file.read()
+    content = await read_pdf_upload(file)
     filename = file.filename
+    user_id = current_user["id"]
 
     def _work():
-        result = process_upload(content, filename)
+        result = process_upload(content, filename, user_id=user_id)
         return {
             "success": True,
             "filename": filename,
@@ -45,23 +50,25 @@ async def upload_pdf(
     if sync:
         try:
             return _work()
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        except UserFacingError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+        except Exception as e:  # noqa: BLE001 - never echo internal error text
+            logger.error("Upload processing failed: %s", describe_exception(e))
+            raise HTTPException(status_code=500, detail=GENERIC_ERROR) from None
 
-    job_id = enqueue("upload_process", _work, user_id=current_user.get("id"))
+    job_id = enqueue("upload_process", _work, user_id=user_id)
     return {"job_id": job_id, "status": "queued"}
 
 
 @router.post("/chat")
 async def chat_upload(
     request: ChatRequest,
-    pdf_hash: str,
+    pdf_hash: str = Query(..., pattern=PDF_HASH_PATTERN),
     book_info: dict = None,
     user: dict = Depends(get_current_user),
 ):
-    """Chat about uploaded PDF."""
+    """Chat about the caller's own uploaded PDF."""
+    user_id = user["id"]
 
     def generate():
         for chunk in ask_upload(
@@ -69,6 +76,7 @@ async def chat_upload(
             pdf_hash=pdf_hash,
             book_info=book_info,
             chat_history=request.chat_history,
+            user_id=user_id,
         ):
             yield chunk
 

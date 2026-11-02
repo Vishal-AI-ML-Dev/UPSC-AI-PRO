@@ -190,11 +190,12 @@ def log_retrieval_metrics(source, query, k, num_relevant, scores):
         avg_score = round(sum(valid) / len(valid), 3) if valid else 0.0
         top_score = round(max(valid), 3) if valid else 0.0
         grounded = rel > 0
-        q = (query or "")[:80].replace(chr(10), " ")
+        # Never log the user's query text - only its length.
+        q_len = len(query or "")
         logger.info(
             f"RETRIEVAL | source={source} | precision@{k}={precision} "
             f"| relevant={rel}/{k} | top={top_score} | avg={avg_score} "
-            f"| grounded={grounded} | q='{q}'"
+            f"| grounded={grounded} | q_len={q_len}"
         )
         score(f"retrieval_precision@{k}", precision, comment=f"{source}: {rel}/{k} relevant")
         score("grounded", 1.0 if grounded else 0.0, comment=str(source))

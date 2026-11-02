@@ -11,7 +11,8 @@ import requests
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.agents.lecture.prompts import CHAT_PROMPT, NOTES_PROMPT, TOPIC_PROMPT, TRANSLATE_PROMPT
-from src.core.llm import get_llm, message_text
+from src.core.errors import UserFacingError
+from src.core.llm import describe_exception, get_llm, message_text
 from src.core.observability import trace_config
 from src.core.prompt_safety import harden_untrusted
 from src.core.vector_store import (
@@ -94,7 +95,7 @@ def _fetch_json3(url: str) -> str:
 def get_transcript(video_id: str) -> tuple[str, str]:
     """Get transcript using yt-dlp."""
     if not video_id:
-        raise ValueError(
+        raise UserFacingError(
             "🔗 This doesn’t look like a valid YouTube link. Please paste a full YouTube video URL and try again."
         )
 
@@ -139,7 +140,7 @@ def get_transcript(video_id: str) -> tuple[str, str]:
             info = ydl.extract_info(url, download=False)
     except Exception as e:
         err = str(e)
-        logger.error(f"yt-dlp extract failed: {err}")
+        logger.error("yt-dlp extract failed: %s", describe_exception(e))
         low = err.lower()
         if any(
             s in low
@@ -152,7 +153,7 @@ def get_transcript(video_id: str) -> tuple[str, str]:
                 "blocked",
             )
         ):
-            raise ValueError(
+            raise UserFacingError(
                 "⏳ YouTube temporarily blocked our server from reading "
                 "this video — this can happen on shared cloud IPs. Please "
                 "try again in a little while. If it keeps happening, this "
@@ -160,12 +161,12 @@ def get_transcript(video_id: str) -> tuple[str, str]:
                 "our server."
             )
         if "private" in low or "members-only" in low or "age" in low:
-            raise ValueError(
+            raise UserFacingError(
                 "🔒 This video looks private or age-restricted, so we "
                 "can’t read its captions. Please try a publicly available "
                 "lecture."
             )
-        raise ValueError(
+        raise UserFacingError(
             "🔒 We couldn’t access this video. It may be "
             "unavailable, region-locked, or the link may be incorrect. Please "
             "check the URL and try a publicly available lecture."
@@ -189,10 +190,10 @@ def get_transcript(video_id: str) -> tuple[str, str]:
                             )
                             return text, detected_lang
                     except Exception as e:
-                        logger.warning(f"json3 fetch failed lang={lang}: {e}")
+                        logger.warning("json3 fetch failed lang=%s: %s", lang, describe_exception(e))
                         continue
 
-    raise ValueError(
+    raise UserFacingError(
         "📝 We couldn’t generate notes for this video because it "
         "doesn’t have captions or subtitles, which we need to read the "
         "lecture. Most educational channels (StudyIQ, Drishti IAS, "
@@ -228,7 +229,7 @@ def _translate_if_needed(text: str, lang: str) -> str:
                 chain.invoke({"text": chunk}, config=trace_config("lecture-translate")).content
             )
         except Exception as e:
-            logger.warning(f"Chunk {i + 1} translation failed: {e}")
+            logger.warning("Chunk %s translation failed: %s", i + 1, describe_exception(e))
             results.append(chunk)
 
     return " ".join(results)
@@ -287,7 +288,7 @@ def _detect_topic(text: str) -> dict:
                     result["relevant"] = verdict
         return result
     except Exception as e:
-        logger.error(f"Topic detection failed: {e}")
+        logger.error("Topic detection failed: %s", describe_exception(e))
         return {
             "topic": "Unknown",
             "paper": "Unknown",
@@ -312,7 +313,7 @@ def _build_from_transcript(
     # Content floor - too little text means there is no real teaching content.
     MIN_TRANSCRIPT_CHARS = 2000
     if not transcript or len(transcript.strip()) < MIN_TRANSCRIPT_CHARS:
-        raise ValueError(
+        raise UserFacingError(
             "📝 There isn’t enough lecture content here to build proper "
             "notes. Please provide a fuller lecture - a complete transcript, or "
             "the full audio of a teaching session."
@@ -346,7 +347,7 @@ def _build_from_transcript(
             f"Relevance gate blocked: content_type={content_type}, "
             f"paper='{topic_info.get('paper')}', multi_paper={multi_paper}, na_paper={na_paper}"
         )
-        raise ValueError(
+        raise UserFacingError(
             "🎬 This doesn’t look like a genuine teaching lecture - it seems to be "
             "entertainment, a personal/anecdotal story, a motivational talk, or just an "
             "announcement (even if it mentions UPSC). UPSC AI is built for study lectures that "
@@ -387,7 +388,7 @@ def _build_from_transcript(
         if not notes.strip():
             raise ValueError("model returned no text")
     except Exception as e:
-        logger.error(f"Notes generation failed: {e}")
+        logger.error("Notes generation failed: %s", describe_exception(e))
         notes = "⚠️ Notes generation failed. Please retry."
 
     if notes and not notes.startswith("⚠️"):
@@ -427,7 +428,24 @@ def _build_from_transcript(
     }
 
 
-def build_lecture_chat_index(video_id: str, transcript: str) -> None:
+def _lecture_key(video_id: str, user_id: str = "") -> str | None:
+    """Vector key for a lecture's chat index.
+
+    YouTube lectures are public content -> one global ``lecture_<video_id>``.
+    Pasted transcripts (``paste_*``) are user-owned -> ``lecture_<uid>_paste_*``;
+    without a user there is no key (fail closed). The legacy global
+    ``lecture_paste_*`` key is never used.
+    """
+    if not video_id:
+        return None
+    if video_id.startswith("paste_"):
+        if not user_id:
+            return None
+        return make_persist_key("lecture", user_id, video_id)
+    return make_persist_key("lecture", video_id)
+
+
+def build_lecture_chat_index(video_id: str, transcript: str, user_id: str = "") -> None:
     """Index a lecture transcript for chat RAG. Best-effort and deferred.
 
     Scheduled as a background task so it runs *after* the notes response has been
@@ -436,8 +454,10 @@ def build_lecture_chat_index(video_id: str, transcript: str) -> None:
     """
     if not transcript or not video_id:
         return
+    key = _lecture_key(video_id, user_id)
+    if key is None:
+        return
     try:
-        key = make_persist_key("lecture", video_id)
         if vector_store_exists(key):
             return
         create_vector_store(
@@ -451,14 +471,14 @@ def build_lecture_chat_index(video_id: str, transcript: str) -> None:
         )
         logger.info(f"Lecture chat index ready: {video_id}")
     except Exception as e:
-        logger.warning(f"Lecture chat index build failed for {video_id}: {e}")
+        logger.warning("Lecture chat index build failed: %s", describe_exception(e))
 
 
 def process_lecture(youtube_url: str, medium: str = "English") -> dict:
     """Process a YouTube lecture via its captions and generate notes."""
     video_id = extract_video_id(youtube_url)
     if not video_id:
-        raise ValueError(
+        raise UserFacingError(
             "🔗 This doesn’t look like a valid YouTube link. Please paste a full YouTube video URL and try again."
         )
     transcript, lang = get_transcript(video_id)
@@ -481,7 +501,7 @@ def process_lecture_from_text(transcript: str, medium: str = "English") -> dict:
     availability or server IP blocks.
     """
     if not transcript or not transcript.strip():
-        raise ValueError("📝 Please paste the lecture transcript text first.")
+        raise UserFacingError("📝 Please paste the lecture transcript text first.")
     vid = "paste_" + _hashlib.md5(transcript.strip().encode("utf-8")).hexdigest()[:11]
     return _build_from_transcript(transcript, "auto", vid, medium)
 
@@ -524,16 +544,22 @@ def ask_lecture(
     video_id: str,
     topic_info: dict | None = None,
     chat_history: list | None = None,
+    *,
+    user_id: str = "",
 ):
-    """Chat about lecture (streaming)."""
+    """Chat about a lecture (streaming). Pasted transcripts are owner-only."""
     if not question or not question.strip():
         yield "Please ask a specific question about the lecture."
+        return
+
+    key = _lecture_key(video_id, user_id)
+    if key is None:
+        yield "Please process the lecture first before chatting."
         return
 
     # Load vector store (Qdrant in prod, local Chroma fallback)
     from src.core.vector_store import load_vector_store
 
-    key = make_persist_key("lecture", video_id)
     db = load_vector_store(key)
     if db is None:
         yield "Please process the lecture first before chatting."
@@ -567,5 +593,5 @@ def ask_lecture(
         if not produced:
             raise ValueError("model returned no text")
     except Exception as e:
-        logger.error(f"Lecture chat failed: {e}")
+        logger.error("Lecture chat failed: %s", describe_exception(e))
         yield "⚠️ Could not process your question. Please try again."

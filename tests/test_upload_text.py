@@ -33,7 +33,7 @@ def blocks(text):
 @pytest.fixture
 def invoke_model(monkeypatch):
     """Queued replies (book detection, then notes); fake PDF + store; fresh cache."""
-    monkeypatch.setattr(ug, "_processed_cache", {})
+    ug.clear_cache()
     monkeypatch.setattr(
         ug, "extract_pdf_text", lambda content, filename: (DOC_TEXT, uuid.uuid4().hex)
     )
@@ -96,20 +96,20 @@ def test_detect_book_relevant_first_word(invoke_model, value, expected):
 
 def test_study_notification_is_not_rejected(invoke_model):
     invoke_model(BOOK_HEAD + "RELEVANT: yes - UPSC exam notification", NOTES_TEXT)
-    result = ug.process_upload(b"%PDF", "notice.pdf")
+    result = ug.process_upload(b"%PDF", "notice.pdf", user_id="u1")
     assert result["notes"].endswith(NOTES_TEXT)
 
 
 def test_explicit_no_still_rejects(invoke_model):
     invoke_model(BOOK_HEAD + "RELEVANT: no")
     with pytest.raises(ValueError, match="doesn.t look like study material"):
-        ug.process_upload(b"%PDF", "invoice.pdf")
+        ug.process_upload(b"%PDF", "invoice.pdf", user_id="u1")
 
 
 # ----------------------------- notes ---------------------------------------- #
 def test_notes_list_content_becomes_text(invoke_model):
     stores = invoke_model(blocks(BOOK_TEXT), blocks(NOTES_TEXT))
-    notes = ug.process_upload(b"%PDF", "polity.pdf")["notes"]
+    notes = ug.process_upload(b"%PDF", "polity.pdf", user_id="u1")["notes"]
     assert isinstance(notes, str)
     assert notes.startswith("> ⚠️ AI-generated notes")
     assert notes.endswith(NOTES_TEXT)
@@ -119,7 +119,7 @@ def test_notes_list_content_becomes_text(invoke_model):
 
 def test_notes_string_unchanged(invoke_model):
     invoke_model(BOOK_TEXT, NOTES_TEXT)
-    assert ug.process_upload(b"%PDF", "polity.pdf")["notes"].endswith(NOTES_TEXT)
+    assert ug.process_upload(b"%PDF", "polity.pdf", user_id="u1")["notes"].endswith(NOTES_TEXT)
 
 
 @pytest.mark.parametrize(
@@ -129,7 +129,7 @@ def test_notes_string_unchanged(invoke_model):
 )
 def test_notes_without_text_show_failure(invoke_model, content):
     invoke_model(BOOK_TEXT, content)
-    assert ug.process_upload(b"%PDF", "polity.pdf")["notes"] == NOTES_FAIL
+    assert ug.process_upload(b"%PDF", "polity.pdf", user_id="u1")["notes"] == NOTES_FAIL
 
 
 # ----------------------------- chat ----------------------------------------- #
@@ -143,14 +143,14 @@ CHAT_TEXT = "Three tiers: village, block, district."
 
 def test_chat_list_stream_yields_text(stream_model):
     stream_model(LIST_STREAM)
-    chunks = list(ug.ask_upload("How many tiers?", "h"))
+    chunks = list(ug.ask_upload("How many tiers?", "h", user_id="u1"))
     assert all(isinstance(c, str) and c for c in chunks)
     assert "".join(chunks) == CHAT_TEXT
 
 
 def test_chat_string_stream_unchanged(stream_model):
     stream_model(["Three tiers: ", "village, block, district."])
-    assert "".join(ug.ask_upload("How many tiers?", "h")) == CHAT_TEXT
+    assert "".join(ug.ask_upload("How many tiers?", "h", user_id="u1")) == CHAT_TEXT
 
 
 @pytest.mark.parametrize(
@@ -160,7 +160,7 @@ def test_chat_string_stream_unchanged(stream_model):
 )
 def test_chat_without_text_shows_failure(stream_model, contents):
     stream_model(contents)
-    chunks = list(ug.ask_upload("How many tiers?", "h"))
+    chunks = list(ug.ask_upload("How many tiers?", "h", user_id="u1"))
     assert all(isinstance(c, str) for c in chunks)
     assert "".join(chunks) == CHAT_FAIL
 
@@ -169,7 +169,7 @@ def test_chat_endpoint_streams_text(client, make_user, stream_model):
     stream_model(LIST_STREAM)
     user = make_user("upload")
     r = client.post(
-        f"{API}/upload/chat?pdf_hash=h",
+        f"{API}/upload/chat?pdf_hash=0123456789abcdef0123456789abcdef",
         json={"request": {"question": "How many tiers?"}},
         headers=user.headers,
     )

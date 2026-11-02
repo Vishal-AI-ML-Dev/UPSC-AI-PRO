@@ -70,7 +70,8 @@ export function Upload() {
     setStreaming(true)
     await streamAgent(
       "/upload/chat?pdf_hash=" + encodeURIComponent(doc.hash),
-      { request: { question, chat_history: history } },
+      // Server keeps only the last 20 turns; sending more just grows the body.
+      { request: { question, chat_history: history.slice(-20) } },
       (piece) =>
         setMessages((prev) => {
           const next = [...prev]

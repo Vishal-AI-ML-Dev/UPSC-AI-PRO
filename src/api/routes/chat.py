@@ -37,6 +37,7 @@ from src.core.scope_gate import check_scope
 from src.graph.app_graph import make_config
 from src.graph.memory import get_store, load_student_profile, save_student_profile
 from src.graph.profile import extract_student_profile_signals, merge_student_profile
+from src.schemas import CHAT_QUESTION_MAX, ID_MAX
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,10 @@ def scoped_thread_id(user_id: str, client_thread_id: str | None) -> str:
 
 
 class AgentChatRequest(BaseModel):
-    question: str = Field(..., min_length=1)
+    question: str = Field(..., min_length=1, max_length=CHAT_QUESTION_MAX)
     thread_id: str | None = Field(
         default=None,
+        max_length=ID_MAX,
         description="Conversation/session id. Defaults to a per-user thread.",
     )
 

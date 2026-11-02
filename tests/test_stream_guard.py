@@ -289,12 +289,12 @@ ENDPOINTS = [
     ("current_affairs", "get_daily_ca", "/api/v1/current-affairs/daily", {"date": "1 January 2026"}),
     ("current_affairs", "get_editorial", "/api/v1/current-affairs/editorial", {"topic": "t"}),
     ("current_affairs", "get_monthly_summary", "/api/v1/current-affairs/monthly", {"month": "January", "year": "2026"}),
-    ("lecture", "ask_lecture", "/api/v1/lecture/chat", {"question": "q", "video_id": "v"}),
+    ("lecture", "ask_lecture", "/api/v1/lecture/chat", {"question": "q", "video_id": "vid12345678"}),
     ("ncert", "ask_ncert", "/api/v1/ncert/chat", {"question": "q", "class_name": "6", "subject": "s", "chapter": "c"}),
     ("planner", "generate_plan", "/api/v1/planner/generate", {"goal": "UPSC 2026"}),
     ("pyq", "generate_questions", "/api/v1/pyq/generate", {"topic": "polity"}),
     ("pyq", "generate_from_bank", "/api/v1/pyq/bank/generate", {}),
-    ("upload", "ask_upload", "/api/v1/upload/chat?pdf_hash=h", {"request": {"question": "q"}}),
+    ("upload", "ask_upload", "/api/v1/upload/chat?pdf_hash=0123456789abcdef0123456789abcdef", {"request": {"question": "q"}}),
 ]
 
 

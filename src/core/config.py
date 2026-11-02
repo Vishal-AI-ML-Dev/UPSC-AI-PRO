@@ -157,6 +157,9 @@ class Settings(BaseSettings):
 
     # Uploads
     max_upload_mb: int = 50  # is se badi file -> 413 (Too Large). Override via MAX_UPLOAD_MB env.
+    # Max body for every non-upload write request (JSON APIs, incl. /upload/chat).
+    # 1 MiB fits the largest legitimate body (200k-char transcript). MAX_REQUEST_BODY_KB env.
+    max_request_body_kb: int = 1024
 
     # Database (multi-user + history). Postgres in prod, SQLite local fallback.
     # e.g. DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
@@ -173,7 +176,8 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_requests: int = 100
     rate_limit_period: int = 60  # seconds
-    # Stricter limit for sensitive auth endpoints (login/register/refresh/reset)
+    # Stricter limit for credential/email auth endpoints (login/register/reset/verify);
+    # /auth/refresh uses only the global limit (ADR-010).
     # to blunt credential-stuffing & user-enumeration. Keyed per-IP, own window.
     auth_rate_limit_requests: int = 10
     auth_rate_limit_period: int = 300  # 5 minutes

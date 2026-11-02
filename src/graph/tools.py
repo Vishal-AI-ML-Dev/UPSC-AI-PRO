@@ -195,7 +195,9 @@ def knowledge_base_tool_fn(query: str, persist_key: str = "") -> str:
         try:
             kb = mentor_kb.search_kb(query, k=4)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("knowledge_base_search (mentor KB) unavailable: %s", exc)
+            logger.warning(
+                "knowledge_base_search (mentor KB) unavailable: %s", _describe(exc)
+            )
             return KB_UNAVAILABLE_NOTE
         context = kb.get("context")
         if not context:
@@ -213,7 +215,7 @@ def knowledge_base_tool_fn(query: str, persist_key: str = "") -> str:
     try:
         scored = db.similarity_search_with_relevance_scores(query, k=4)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("knowledge_base_search failed for %s: %s", persist_key, exc)
+        logger.warning("knowledge_base_search failed: %s", _describe(exc))
         return KB_FALLBACK_NOTE
 
     parts = []
@@ -235,12 +237,30 @@ def knowledge_base_tool_fn(query: str, persist_key: str = "") -> str:
     return harden_untrusted("\n\n".join(parts), label="knowledge base excerpt")
 
 
+def mentor_kb_search(query: str, **_ignored: Any) -> str:
+    """Model-facing knowledge-base search: the verified Mentor KB only.
+
+    The model must never choose which vector collection is read (uploads, PYQ
+    banks and pasted lectures are user-owned). Any ``persist_key`` or other
+    argument the model emits is ignored here - this is the server-side
+    enforcement; the tool schema simply does not offer the argument.
+    """
+    return knowledge_base_tool_fn(query)
+
+
+def _describe(exc: BaseException) -> str:
+    """Secret-safe exception summary (lazy import keeps this module light)."""
+    from src.core.llm import describe_exception
+
+    return describe_exception(exc)
+
+
 # Registry: tool name -> plain callable. Names MUST match get_structured_tools().
 # A tool returns either plain text or a ``(text, artifact)`` pair; the artifact
 # carries structured provenance (web_search sources) for citations.
 TOOL_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "web_search": web_search_with_sources,
-    "knowledge_base_search": knowledge_base_tool_fn,
+    "knowledge_base_search": mentor_kb_search,
 }
 
 
@@ -287,12 +307,14 @@ def run_tool_calls(
             except TypeError as exc:
                 content = f"ERROR: bad arguments for tool '{name}': {exc}"
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Tool '%s' raised: %s", name, exc)
+                logger.warning("Tool '%s' raised: %s", name, _describe(exc))
                 # KB fail ho to bhi model apne knowledge se jawab de (apology nahi).
                 if name == "knowledge_base_search":
                     content = KB_FALLBACK_NOTE
                 else:
-                    content = f"ERROR: tool '{name}' failed: {exc}"
+                    # Fixed text: exception messages can carry paths/provider
+                    # bodies and the model could repeat them to the student.
+                    content = f"ERROR: tool '{name}' failed."
         result = {"tool_call_id": call_id, "name": name, "content": content}
         if artifact is not None:
             result["artifact"] = artifact
@@ -416,11 +438,10 @@ def get_structured_tools() -> list:
         return web_search_tool_fn(query)
 
     @tool
-    def knowledge_base_search(query: str, persist_key: str = "") -> str:
-        """Retrieve grounded, source-labelled passages. Pass persist_key to
-        search a specific document (NCERT chapter/lecture/upload); leave it empty
-        to search the verified Mentor knowledge base."""
-        return knowledge_base_tool_fn(query, persist_key)
+    def knowledge_base_search(query: str) -> str:
+        """Retrieve grounded, source-labelled passages from the verified UPSC
+        Mentor knowledge base (polity, history, geography, economy, concepts)."""
+        return mentor_kb_search(query)
 
     return [web_search, knowledge_base_search]
 

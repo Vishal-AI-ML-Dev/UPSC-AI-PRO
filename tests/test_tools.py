@@ -90,8 +90,9 @@ def test_unknown_tool_becomes_error_not_exception():
 
 def test_tool_exception_becomes_error_not_exception():
     out = run_tool_calls([{"name": "explode", "args": {}, "id": "x"}], registry=FAKE)
-    assert out[0]["content"].startswith("ERROR: tool 'explode' failed:")
-    assert "kaboom" in out[0]["content"]
+    assert out[0]["content"].startswith("ERROR: tool 'explode' failed")
+    # Phase 02 (AC4, approved by the user): exception text never reaches the model.
+    assert "kaboom" not in out[0]["content"]
 
 
 def test_bad_argument_name_becomes_error():
@@ -207,3 +208,67 @@ def test_compose_system_ignores_empty():
     assert _compose_system("BASE", "") == "BASE"
     assert _compose_system("BASE", None) == "BASE"
     assert _compose_system("BASE", "   ") == "BASE"
+
+
+# --------------------------------------------------------------------------- #
+# Phase 02 (AC4): the model can never choose which vector collection to read
+# --------------------------------------------------------------------------- #
+def _spy_vector_layer(monkeypatch):
+    import src.core.mentor_kb as mentor_kb
+    import src.core.vector_store as vector_store
+
+    loaded: list[str] = []
+    kb_queries: list[str] = []
+
+    def fake_load(key):
+        loaded.append(key)
+        return None
+
+    def fake_kb(query, k=4, **_kw):
+        kb_queries.append(query)
+        return {"context": "MENTOR-KB-PASSAGE", "citations": [], "grounded": True}
+
+    monkeypatch.setattr(vector_store, "load_vector_store", fake_load)
+    monkeypatch.setattr(mentor_kb, "search_kb", fake_kb)
+    return loaded, kb_queries
+
+
+def test_model_chosen_persist_key_is_ignored_by_dispatch(monkeypatch):
+    loaded, kb_queries = _spy_vector_layer(monkeypatch)
+    calls = [
+        {
+            "name": "knowledge_base_search",
+            "args": {"query": "fundamental rights", "persist_key": "pyqbank_victimuserid"},
+            "id": "c1",
+        },
+        {
+            "name": "knowledge_base_search",
+            "args": {"query": "dpsp", "persist_key": "upload_victim_" + "0" * 32},
+            "id": "c2",
+        },
+    ]
+    out = run_tool_calls(calls)  # default (production) registry
+    assert loaded == []  # no arbitrary collection was opened
+    assert kb_queries == ["fundamental rights", "dpsp"]  # mentor KB searched instead
+    assert all("MENTOR-KB-PASSAGE" in r["content"] for r in out)
+
+
+def test_structured_kb_tool_has_no_persist_key_argument():
+    from src.graph.tools import get_structured_tools
+
+    tools = {t.name: t for t in get_structured_tools()}
+    kb = tools["knowledge_base_search"]
+    assert "persist_key" not in kb.args
+    assert "persist_key" not in (kb.description or "").lower()
+
+
+def test_tool_exception_text_is_not_returned_to_model():
+    def leaky(**_kw):
+        raise RuntimeError("secret-path /srv/app/.env")
+
+    out = run_tool_calls(
+        [{"name": "web_search", "args": {"query": "x"}, "id": "c9"}],
+        registry={"web_search": leaky},
+    )
+    assert "secret-path" not in out[0]["content"]
+    assert out[0]["content"] == "ERROR: tool 'web_search' failed."

@@ -10,10 +10,17 @@ import bcrypt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.core.errors import UserFacingError
+from src.core.llm import describe_exception
 from src.core.models import User
 
 logger = logging.getLogger(__name__)
 _MAX_BYTES = 72  # bcrypt hard 72-byte limit on the password input
+_MIN_CHARS = 6
+PASSWORD_TOO_SHORT = "Password must be at least 6 characters"
+PASSWORD_TOO_LONG = (
+    "Password must be at most 72 bytes (fewer if it uses non-English characters)."
+)
 
 
 def _to_bytes(plain: str) -> bytes:
@@ -31,8 +38,22 @@ def verify_password(plain: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(_to_bytes(plain), hashed.encode("utf-8"))
     except Exception as e:
-        logger.warning(f"Password verify failed: {e}")
+        logger.warning("Password verify failed: %s", describe_exception(e))
         return False
+
+
+def _validate_new_password(password: str) -> None:
+    """Rules for a NEW password (register / reset only - never login).
+
+    The existing 6-character minimum is checked first, unchanged; then bcrypt's
+    72-byte input limit, so two different passwords can never collapse into the
+    same hash by truncation. Login keeps truncating verification for accounts
+    created before this rule existed.
+    """
+    if not password or len(password) < _MIN_CHARS:
+        raise UserFacingError(PASSWORD_TOO_SHORT)
+    if len(password.encode("utf-8")) > _MAX_BYTES:
+        raise UserFacingError(PASSWORD_TOO_LONG)
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
@@ -43,14 +64,13 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 
 
 def create_user(db: Session, email: str, password: str, name: str = "") -> User:
-    """Create a new user. Raises ValueError if invalid or email already exists."""
+    """Create a new user. Raises UserFacingError if invalid or email already exists."""
     key = (email or "").lower().strip()
     if not key or "@" not in key:
-        raise ValueError("A valid email is required")
-    if not password or len(password) < 6:
-        raise ValueError("Password must be at least 6 characters")
+        raise UserFacingError("A valid email is required")
+    _validate_new_password(password)
     if get_user_by_email(db, key):
-        raise ValueError("Email already registered")
+        raise UserFacingError("Email already registered")
     user = User(
         email=key,
         name=(name or "").strip() or key.split("@")[0],
@@ -59,7 +79,7 @@ def create_user(db: Session, email: str, password: str, name: str = "") -> User:
     db.add(user)
     db.commit()
     db.refresh(user)
-    logger.info(f"Created user: {key}")
+    logger.info("Created user id %s", user.id)
     return user
 
 
@@ -77,6 +97,5 @@ def hash_new_password(new_password: str) -> str:
     Does not touch the database: the reset route writes the hash in the same
     transaction that consumes the reset token and ends every session.
     """
-    if not new_password or len(new_password) < 6:
-        raise ValueError("Password must be at least 6 characters")
+    _validate_new_password(new_password)
     return hash_password(new_password)

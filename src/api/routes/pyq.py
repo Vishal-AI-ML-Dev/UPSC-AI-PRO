@@ -2,6 +2,8 @@
 PYQ routes - Question generation and practice
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -16,7 +18,10 @@ from src.agents.pyq.graph import (
 )
 from src.api.deps import get_current_user
 from src.api.stream_guard import guard_stream
+from src.api.upload_limit import read_pdf_upload
+from src.core.errors import GENERIC_ERROR, UserFacingError
 from src.core.job_queue import enqueue
+from src.core.llm import describe_exception
 from src.schemas import (
     BankGenRequest,
     BankStatusResponse,
@@ -25,6 +30,8 @@ from src.schemas import (
     QuestionGenRequest,
     TopicSuggestionsResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pyq", tags=["PYQ"])
 
@@ -74,10 +81,7 @@ async def bank_upload(
 
     Background job by default (poll GET /jobs/{id}); ``?sync=true`` runs inline.
     """
-    if not (file.filename or "").lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
-    content = await file.read()
+    content = await read_pdf_upload(file)
     filename = file.filename
     user_id = current_user["id"]
 
@@ -88,10 +92,11 @@ async def bank_upload(
     if sync:
         try:
             return _work()
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Bank upload failed: {str(e)}")
+        except UserFacingError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
+        except Exception as e:  # noqa: BLE001 - never echo internal error text
+            logger.error("PYQ bank upload failed: %s", describe_exception(e))
+            raise HTTPException(status_code=500, detail=GENERIC_ERROR) from None
 
     job_id = enqueue("pyq_bank_upload", _work, user_id=user_id)
     return {"job_id": job_id, "status": "queued"}

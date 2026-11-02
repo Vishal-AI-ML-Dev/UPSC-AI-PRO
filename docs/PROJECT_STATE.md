@@ -8,24 +8,24 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 |---|---|---|
 | 00 | Engineering workspace setup | DONE (2026-11-02) — `docs/phase-reports/phase-00-report.md` |
 | 01 | Baseline & safety net | DONE (2026-11-02) — `docs/phase-reports/phase-01-report.md` |
-| 02 | Security & ownership | **NEXT** — spec STUB `.claude/specs/phase-02-security-ownership.md` |
-| 03–09 | See `.claude/specs/README.md` | STUB |
+| 02 | Security & ownership | DONE (2026-11-02) — `docs/phase-reports/phase-02-report.md` |
+| 03 | Request-path performance | **NEXT** — spec STUB `.claude/specs/phase-03-request-path-performance.md` |
+| 04–09 | See `.claude/specs/README.md` | STUB |
 
 ## The 8 workflows (must not regress)
 | Workflow | Backend entry | Frontend | Status (last verified) |
 |---|---|---|---|
-| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; offline smoke (mount/401/422) PASS 2026-11-02 |
-| NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; offline smoke (mount/401/422) PASS 2026-11-02 |
-| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; offline smoke (mount/401/422) PASS 2026-11-02 |
-| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke (mount/401/422) PASS 2026-11-02 |
-| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke (mount/401/422) PASS 2026-11-02 |
-| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke (mount/401/422) PASS 2026-11-02 |
-| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; offline smoke (mount/401/422) PASS 2026-11-02 |
-| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Works per code; no per-user ownership; offline smoke (mount/401/422) PASS 2026-11-02 |
+| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02 |
+| NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 |
+| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02 |
+| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02 |
+| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 |
+| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke PASS 2026-11-02 |
+| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02 |
+| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02 |
 
-Test suite status (2026-11-02): baseline `897 passed, 13 warnings in 87.54s`; latest (closing gate) `930 passed, 13 warnings in 84.20s`
-(post-review run `930 passed, 13 warnings in 104.17s`); 64 modules, +33 from `tests/test_workflow_smoke.py`
-(`33 passed, 3 warnings in 6.46s`). Ruff: `All checks passed!`. compileall, frontend build (baseline) and prettier: clean.
+Test suite status (2026-11-02, Phase 02 close): `1086 passed, 13 warnings in 146.43s` (Phase 01 close: `930 passed`).
+Ruff: `All checks passed!`. compileall exit 0. Frontend `npm run build` ✓ and `npm run lint` clean.
 Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 
 ## Verified architecture facts
@@ -47,20 +47,20 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 ## Open risks (from the audit risk register; ranked)
 | # | Risk | Sev | Planned phase |
 |---|---|---|---|
-| 1 | No ownership at vector boundary; LLM-chosen `persist_key`; global upload collections | HIGH | 02 |
+| 1 | ~~No ownership at vector boundary; LLM-chosen `persist_key`; global upload collections~~ CLOSED Phase 02 (ADR-007); legacy collections remain (cleanup backlog) | HIGH | 02 ✓ |
 | 2 | Blocking work in `async def` handlers (single worker) | HIGH | 03 |
 | 3 | Non-durable jobs; boot reaper fails sibling workers' jobs | HIGH/MED | 04 |
 | 4 | Vector stack fails without Qdrant (Chroma not installed) | HIGH (misconfig) | 06 |
-| 5 | Unbounded inputs + checkpoint history growth → cost | MED | 02 / 03 |
-| 6 | Auth rate limit configured but unused; account enumeration | MED | 02 |
+| 5 | Unbounded inputs → CLOSED Phase 02 (field + 1 MiB body limits, ADR-009); checkpoint history growth still open | MED | 03 |
+| 6 | Auth rate limit → CLOSED Phase 02 (ADR-010, refresh excluded); account enumeration (register message, no dummy bcrypt) still open | MED | backlog |
 | 7 | Tokens in `localStorage` | MED | backlog |
-| 8 | Upload size check relies on Content-Length; unbounded `_processed_cache` | MED | 02 |
+| 8 | ~~Upload size check relies on Content-Length; unbounded `_processed_cache`~~ CLOSED Phase 02 (byte-counted limits, bounded thread-safe per-user cache); upload memory ~2×50 MB/request open | MED | 03/04 |
 | 9 | 24 h semantic cache can serve stale time-sensitive answers | MED | 06 |
 | 10 | Eval gate tests CRAG path production never runs | MED | 08 |
 | 11 | In-memory store fallback when not Postgres | MED | 09 |
 | 12 | Migrations run per process; LangGraph tables outside Alembic | LOW–MED | 09 |
 | 13 | `/health` checks nothing; no readiness/backups | MED | 09 |
-| 14 | Exception text leaked; PII in logs; public `/docs` | LOW | 02 / 09 |
+| 14 | Exception text leaked; PII in logs → CLOSED Phase 02 for touched files (ADR-008); repo-wide log sweep + public `/docs` open | LOW | 09 |
 | 15 | Dead/duplicate code; unused deps/settings | LOW | 09 (kept per ADR-006) |
 | 16 | Non-blocking CI lint; no frontend tests; live smoke disabled | LOW | 09 |
 | 17 | Compose: unpinned qdrant, default creds, exposed ports, unused redis | LOW | 09 |
@@ -90,16 +90,41 @@ All items below were corrected in place; claim → evidence table in `docs/phase
   `job_max_retries`, `job_timeout_seconds`, `rq_queue_name`, `auth_rate_limit_*` — LOW.
 - Missing referenced files: `src/worker.py`, `scripts/cron_cleanup.py`, `tests/test_smoke_live.py` — LOW.
 - `.dockerignore` excludes `*.md`, so `data/mentor_kb/*.md` is not in the image — LOW.
+- (Phase 09) `src/agents/upload/upload.py` (dead, unmounted, unauthenticated; kept by ADR-006) still calls
+  `process_upload(content, filename)` / `ask_upload(...)` without the now-required `user_id` and returns
+  `detail=str(e)`. It would fail closed if mounted. Delete with user approval in Phase 09 — LOW.
+- (Risk, ADR-010) `/auth/refresh` is limited only by the global per-IP limiter; if Render's proxy peer is not in
+  `FORWARDED_ALLOW_IPS`, all clients would share one global bucket — verify `request.client.host` on staging — MED.
 - Version mismatch: pyproject 0.1.0 / app 2.0.0 / frontend 1.0.0; Streamlit-era defaults (port 8501) — LOW.
 
+- (Phase 02) Legacy global collections `upload_<hash>` / `lecture_paste_<hash>` are kept but unread; plan a cleanup
+  (needs user approval; never delete silently) — LOW.
+- (Phase 02) Client-sent `book_info` (`/upload/chat`) and `topic_info` (`/lecture/chat`) dicts are unbounded and reach
+  prompts unfenced (`src/agents/upload/graph.py` ask_upload, `src/agents/lecture/graph.py` ask_lecture); caller's own
+  session only, capped by the 1 MiB body limit — LOW.
+- (Phase 02) `src/agents/pyq/graph.py:_bank_key` falls back to a shared `"anon"` key for an empty user id; should raise — LOW.
+- (Phase 02) Account enumeration: register returns "Email already registered"; `authenticate` skips bcrypt for unknown
+  emails (timing) — MED.
+- (Phase 02) `make_persist_key` lower-cases case-sensitive YouTube ids (public content collisions only) — LOW.
+- (Phase 02) Upload memory: one request can hold ~2 × `MAX_UPLOAD_MB` and pypdf parses twice; queued jobs keep bytes in
+  closures — MED (Phase 03/04).
+- (Phase 02) NITs: `mount_mcp` logs a warning on every call (`src/mcp_server.py`); `_UploadCache.get` returns a shallow
+  copy (nested `book_info` shared); f-string/filename/topic log lines remain (`src/agents/lecture/graph.py` "chat index
+  ready", topic logs; `src/agents/pyq/graph.py` filename log); `TypeError` text still returned to the model
+  (`src/graph/tools.py`); `UPLOAD_ENDPOINTS` hard-codes `/api/v1`; auth limiter is per worker without Redis — LOW.
+
+- (Phase 02, doc drift) `CLAUDE.md:79` ("uploads are keyed by file MD5 with no owner check") and
+  `.claude/rules/security.md:21` ("known gap: knowledge_base_tool_fn, chat_upload") are outdated after Phase 02;
+  not in the plan, so not edited — update with user approval — LOW.
+
 ### Last handoff — 2026-11-02
-- Active phase: 01 Baseline & safety net — DONE (spec DONE, plan DONE). Next: 02 Security & ownership — spec STUB, plan none.
-- Done this session: Phase 01 end to end — baseline gates; `tests/test_workflow_smoke.py`; `docs/SMOKE_CHECKLIST.md`;
-  README/ARCHITECTURE drift corrected; ADR-006; review (0 BLOCKING, findings 1–5 fixed); phase report
-  `docs/phase-reports/phase-01-report.md`; status updates in spec, plan, `.claude/specs/README.md`, this file.
-- Verified: `uv run pytest -q` → closing gate `930 passed, 13 warnings in 84.20s` (post-review run `104.17s`); smoke `33 passed, 3 warnings in 6.46s`;
-  ruff `All checks passed!`; compileall exit 0; `npm run lint` clean; `git diff --stat -- src frontend migrations .github` empty.
-  Not verified: live workflow smoke (UNVERIFIED); README §5 size metrics; frontend build not re-run (frontend unchanged).
-- In progress / next step: `/start-phase 2` (not started).
-- Open questions for the user: none.
-- Uncommitted changes: none — the 10 Phase 01 files are committed as `test: add workflow baseline and safety net` (not pushed).
+- Active phase: 02 Security & ownership — DONE (spec DONE, plan DONE). Next: 03 Request-path performance — spec STUB, plan none.
+- Done this session: Phase 02 end to end — spec/plan (4 revisions + review amendment), deployment check, test-first
+  security tests (8 new files), R1–R15 incl. R12-FC, review fixes (cache lock, refresh outside auth budget, single hash
+  pattern), ADR-007..010, phase report `docs/phase-reports/phase-02-report.md`.
+- Verified: `uv run pytest -q` → `1086 passed, 13 warnings in 146.43s`; ruff `All checks passed!`; compileall exit 0;
+  `npm run build` ✓ built in 3.73s; `npm run lint` clean; security + quality re-review 0 BLOCKING / 0 SHOULD-FIX.
+  Not verified: live Render settings (Q5), Render proxy peer vs `FORWARDED_ALLOW_IPS`, live workflow smoke.
+- In progress / next step: user decides on committing Phase 02; then `/start-phase 3` (not started).
+- Open questions for the user: Q5 (optional — R12-FC in place); commit message for Phase 02.
+- Uncommitted changes: all Phase 02 files (28 modified, 11 new incl. this report; plus `.claude/specs/README.md`); nothing committed.

@@ -89,7 +89,8 @@ export function Lecture() {
         question,
         video_id: lecture.video_id,
         topic_info: lecture.topic_info,
-        chat_history: history,
+        // Server keeps only the last 20 turns; sending more just grows the body.
+        chat_history: history.slice(-20),
       },
       (piece) =>
         setMessages((prev) => {

@@ -33,7 +33,7 @@ def test_history_objects_reach_prompt(chat_prompt):
         ChatMessage(role="user", content="What is Part III?"),
         ChatMessage(role="assistant", content="It lists the Fundamental Rights."),
     ]
-    out = "".join(ug.ask_upload("Explain that again", "h", chat_history=history))
+    out = "".join(ug.ask_upload("Explain that again", "h", user_id="u1", chat_history=history))
     assert out == "Answer."
     assert "Student: What is Part III?" in chat_prompt[0]
     assert "Assistant: It lists the Fundamental Rights." in chat_prompt[0]
@@ -42,7 +42,7 @@ def test_history_objects_reach_prompt(chat_prompt):
 
 def test_history_dicts_reach_prompt(chat_prompt):
     list(
-        ug.ask_upload("And Part IV?", "h", chat_history=[{"role": "user", "content": "Part III?"}])
+        ug.ask_upload("And Part IV?", "h", user_id="u1", chat_history=[{"role": "user", "content": "Part III?"}])
     )
     assert "Student: Part III?" in chat_prompt[0]
 
@@ -53,7 +53,7 @@ def test_history_is_bounded_and_filtered(chat_prompt):
         {"role": "system", "content": "IGNORED SYSTEM TURN"},
         {"role": "assistant", "content": "x" * 5000},
     ]
-    list(ug.ask_upload("Next?", "h", chat_history=history))
+    list(ug.ask_upload("Next?", "h", user_id="u1", chat_history=history))
     prompt = chat_prompt[0]
     assert "IGNORED SYSTEM TURN" not in prompt
     assert "old question 4" not in prompt
@@ -62,19 +62,19 @@ def test_history_is_bounded_and_filtered(chat_prompt):
 
 
 def test_no_history_renders_none(chat_prompt):
-    list(ug.ask_upload("First?", "h"))
+    list(ug.ask_upload("First?", "h", user_id="u1"))
     assert "(none)" in chat_prompt[0]
 
 
 def test_history_is_marked_not_a_fact_source(chat_prompt):
-    list(ug.ask_upload("First?", "h"))
+    list(ug.ask_upload("First?", "h", user_id="u1"))
     assert "NOT a source of facts" in chat_prompt[0]
 
 
 def test_chat_endpoint_passes_history(client, make_user, chat_prompt):
     user = make_user("uphist")
     r = client.post(
-        "/api/v1/upload/chat?pdf_hash=h",
+        "/api/v1/upload/chat?pdf_hash=0123456789abcdef0123456789abcdef",
         json={
             "request": {
                 "question": "And its exceptions?",

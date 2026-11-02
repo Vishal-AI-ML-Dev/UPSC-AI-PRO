@@ -15,7 +15,7 @@ from contextlib import contextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -30,6 +30,8 @@ from src.core.email_utils import (
     smtp_configured,
     verification_enforced,
 )
+from src.core.errors import GENERIC_ERROR, UserFacingError
+from src.core.llm import describe_exception
 from src.core.models import User
 from src.core.refresh_tokens import (
     SessionRejected,
@@ -56,10 +58,34 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger(__name__)
 
 
+# Input bounds (Phase 02, R6/R14). NEW passwords (register/reset) get a coarse
+# 128-char bound here; the 6-char minimum and the 72-byte bcrypt maximum are
+# enforced in src/core/users.py. Login is a separate path (_login_input_too_long).
+EMAIL_MAX = 254
+NAME_MAX = 100
+NEW_PASSWORD_MAX_CHARS = 128
+TOKEN_MAX = 512
+LOGIN_USERNAME_MAX = 254
+LOGIN_PASSWORD_MAX = 1024
+
+
 class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    name: str = ""
+    email: str = Field(..., max_length=EMAIL_MAX)
+    password: str = Field(..., max_length=NEW_PASSWORD_MAX_CHARS)
+    name: str = Field("", max_length=NAME_MAX)
+
+
+def _login_input_too_long(username: str, password: str) -> bool:
+    """Login-only bound: legacy passwords up to 1,024 chars are still verified
+    (bcrypt truncation, as before); longer input is rejected as a normal 401
+    without running bcrypt. Never used by register/reset."""
+    return len(username or "") > LOGIN_USERNAME_MAX or len(password or "") > LOGIN_PASSWORD_MAX
+
+
+def _unexpected(e: Exception, what: str) -> HTTPException:
+    """R10: log a secret-safe summary; return the fixed generic message."""
+    logger.error("%s failed: %s", what, describe_exception(e))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=GENERIC_ERROR)
 
 
 @contextmanager
@@ -118,7 +144,9 @@ def _send_verification(db: Session, user) -> None:
         raw = create_verification_token(db, user.id)
         send_verification_email(user.email, _frontend_link("verify_token", raw))
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Verification email failed for {user.email}: {e}")
+        logger.error(
+            "Verification email failed for user id %s: %s", user.id, describe_exception(e)
+        )
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -132,8 +160,10 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
         _require_email_delivery()
     try:
         user = create_user(db, body.email, body.password, body.name)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except UserFacingError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+    except Exception as e:  # noqa: BLE001 - R10: never echo internal error text
+        raise _unexpected(e, "Registration") from None
     if verification_enforced():
         _send_verification(db, user)
         return {
@@ -157,7 +187,10 @@ def login(
 
     A successful login supersedes the account's previous session everywhere.
     """
-    user = authenticate(db, form_data.username, form_data.password)
+    if _login_input_too_long(form_data.username, form_data.password):
+        user = None
+    else:
+        user = authenticate(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -182,7 +215,7 @@ async def me(current_user: dict = Depends(get_current_user)):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(..., max_length=TOKEN_MAX)
 
 
 @router.post("/refresh")
@@ -214,12 +247,12 @@ def logout(body: RefreshRequest, db: Session = Depends(get_db)):
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: str
+    email: str = Field(..., max_length=EMAIL_MAX)
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str
+    token: str = Field(..., max_length=TOKEN_MAX)
+    new_password: str = Field(..., max_length=NEW_PASSWORD_MAX_CHARS)
 
 
 @router.post("/forgot-password")
@@ -238,7 +271,9 @@ async def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get
             link = f"{base}{sep}reset_token={raw_token}"
             send_reset_email(user.email, link)
         except Exception as e:  # noqa: BLE001
-            logger.error(f"Password reset email failed for {user.email}: {e}")
+            logger.error(
+                "Password reset email failed for user id %s: %s", user.id, describe_exception(e)
+            )
     return {"message": "If an account exists for that email, a reset link has been sent."}
 
 
@@ -250,8 +285,10 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Consume a reset token, set the new password and end every session - atomically."""
     try:
         new_hash = hash_new_password(body.new_password)  # validate before using the link
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except UserFacingError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+    except Exception as e:  # noqa: BLE001 - R10: never echo internal error text
+        raise _unexpected(e, "Password reset") from None
     found = find_reset_token(db, body.token)
     if not found:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_BAD_RESET_LINK)
@@ -266,11 +303,11 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
 
 
 class VerifyEmailRequest(BaseModel):
-    token: str
+    token: str = Field(..., max_length=TOKEN_MAX)
 
 
 class ResendVerificationRequest(BaseModel):
-    email: str
+    email: str = Field(..., max_length=EMAIL_MAX)
 
 
 _BAD_VERIFY_LINK = "Invalid or expired verification link. Please request a new one."

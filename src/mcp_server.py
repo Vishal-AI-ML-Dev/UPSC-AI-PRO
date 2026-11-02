@@ -13,10 +13,10 @@ without the MCP SDK or any heavy dependency:
    already-tested tool functions; heavy imports stay lazy *inside* each handler.
    Importing this module pulls in NO mcp / langchain / vector dependency.
 2. **Server wiring** - ``build_server()`` registers each spec on a FastMCP
-   instance; ``run()`` starts it over the transport chosen in settings/env;
-   ``mount_mcp(app)`` mounts it onto the existing FastAPI app (no extra
-   service). The ``mcp`` SDK is imported lazily so layer 1 (and app boot)
-   never needs it.
+   instance; ``run()`` starts it over the local stdio transport only. The
+   network (SSE) transport and ``mount_mcp(app)`` are disabled because the
+   tools are unauthenticated (Phase 02, R12-FC). The ``mcp`` SDK is imported
+   lazily so layer 1 (and app boot) never needs it.
 """
 
 from __future__ import annotations
@@ -69,15 +69,17 @@ def _collect(result) -> str:
 # Heavy imports stay lazy so importing this module is dependency-free.
 # --------------------------------------------------------------------------- #
 def knowledge_base_search(query: str, persist_key: str = "") -> str:
-    """Retrieve grounded, source-labelled passages from the UPSC knowledge base.
-
-    Pass ``persist_key`` to search a specific document collection (an NCERT
-    chapter, lecture, or upload); leave it empty to search the verified Mentor
+    """Retrieve grounded, source-labelled passages from the verified UPSC Mentor
     knowledge base. Returns fenced, citeable context text.
+
+    ``persist_key`` is accepted for backward compatibility but IGNORED: an MCP
+    caller is unauthenticated, so it may never address a specific (possibly
+    user-owned) collection (Phase 02, R12-FC).
     """
+    del persist_key  # never honoured - see docstring
     from src.graph.tools import knowledge_base_tool_fn
 
-    return knowledge_base_tool_fn(query, persist_key)
+    return knowledge_base_tool_fn(query)
 
 
 def web_search(query: str) -> str:
@@ -122,8 +124,7 @@ def build_mcp_tool_specs() -> list[ToolSpec]:
     return [
         ToolSpec(
             "knowledge_base_search",
-            "Grounded retrieval from the UPSC knowledge base (optionally a "
-            "specific NCERT/lecture/upload collection via persist_key).",
+            "Grounded retrieval from the verified UPSC Mentor knowledge base.",
             knowledge_base_search,
         ),
         ToolSpec(
@@ -160,34 +161,30 @@ def build_server(name: str = SERVER_NAME):
 
 
 def mount_mcp(app, *, path: str | None = None) -> bool:
-    """Mount the MCP server onto an existing FastAPI/Starlette app (no extra
-    service/port). No-op unless ``settings.mcp_enabled`` is true, so app boot
-    and the ``mcp`` dependency stay optional. Returns True if mounted.
-    """
-    from src.core.config import settings
+    """Network (SSE) mounting is DISABLED (Phase 02, R12-FC, fail closed).
 
-    if not getattr(settings, "mcp_enabled", False):
-        return False
-    mount_path = path or getattr(settings, "mcp_http_path", "/mcp")
-    try:
-        server = build_server()
-        app.mount(mount_path, server.sse_app())
-        logger.info("MCP server mounted at %s (sse)", mount_path)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("MCP mount skipped: %s", exc)
-        return False
+    The MCP tools have no authentication, so they must not be reachable over
+    HTTP. This always returns False without mounting anything, whatever
+    ``settings.mcp_enabled`` says. Use the local stdio transport instead.
+    """
+    del app, path
+    logger.warning("MCP network mount refused: only the local stdio transport is allowed")
+    return False
 
 
 def run(transport: str | None = None) -> None:
     """Run the MCP server standalone (``python -m src.mcp_server``).
 
     Transport comes from the argument, else ``settings.mcp_transport``, else
-    stdio. stdio = local desktop clients; sse = network/remote.
+    stdio. Only stdio (local desktop clients) is allowed; a network transport
+    (sse/http) is refused (Phase 02, R12-FC).
     """
     from src.core.config import settings
 
     chosen = resolve_transport(transport or getattr(settings, "mcp_transport", _STDIO))
+    if chosen != _STDIO:
+        # Phase 02, R12-FC: unauthenticated tools must never listen on a network port.
+        raise RuntimeError("MCP network transport is disabled; run with the stdio transport.")
     server = build_server()
     logger.info("Starting UPSC MCP server (transport=%s)", chosen)
     server.run(transport=chosen)

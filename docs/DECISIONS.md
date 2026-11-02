@@ -51,3 +51,42 @@ Append new ADRs; never rewrite accepted ones — supersede them.
   `test_stream_citations.py` cases that import `mentor.py`.
 - **Consequences:** The files stay importable and must not be registered by accident; reviewers treat them as
   out of scope. No runtime change.
+
+## ADR-007 — Ownership encoded in user-scoped vector keys; no legacy fallback
+2026-11-02 · Accepted (Phase 02)
+- **Context:** Uploads (`upload_<md5>`) and pasted lectures (`lecture_paste_<md5>`) were global collections readable
+  by any user who knew the id; the mentor model could pick any `persist_key`.
+- **Decision:** Owner id is part of the key (`upload_<uid>_<md5>`, `lecture_<uid>_paste_<hex11>`), built server-side
+  from the JWT; ids are format-validated; the mentor tool and MCP server cannot choose a collection. Legacy
+  collections are kept but never read (no fallback, no migration). A rollback build must keep these protections or
+  disable the affected endpoints (see the Phase 02 plan, *Rollback*).
+- **Consequences:** No schema change. Users re-upload PDFs / re-paste transcripts processed before Phase 02.
+  Legacy collections need a later cleanup (backlog).
+
+## ADR-008 — `UserFacingError` is the only displayable error
+2026-11-02 · Accepted (Phase 02)
+- **Context:** Routes returned `str(e)` for any `ValueError` and `f"... failed: {e}"` on 500; jobs stored `str(e)`.
+- **Decision:** `src/core/errors.py:UserFacingError` (fixed strings only) → HTTP 400 / job error text. Every other
+  exception, including plain `ValueError`, → 500 / `GENERIC_ERROR`, logged with `describe_exception` only.
+- **Consequences:** Unexpected failures show a generic message; intended user messages are raised as
+  `UserFacingError` at their source.
+
+## ADR-009 — Exact upload allow-list and a 1 MiB body limit for everything else
+2026-11-02 · Accepted (Phase 02)
+- **Context:** The upload-size middleware matched any path containing "upload" and trusted `Content-Length`.
+- **Decision:** Only `POST /api/v1/upload/process` and `POST /api/v1/pyq/bank/upload` get `max_upload_mb`; every
+  other write body gets `max_request_body_kb` (1 MiB). Limits count received bytes. Chat history is trimmed to 20
+  messages server-side (before validation) and client-side.
+- **Consequences:** Long chats keep working; oversized JSON bodies get 413. A new upload endpoint must be added to
+  `UPLOAD_ENDPOINTS` explicitly.
+
+## ADR-010 — `/auth/refresh` is outside the dedicated auth rate limit
+2026-11-02 · Accepted (Phase 02 review amendment, approved by the user)
+- **Context:** Phase 02 R5 originally put `/auth/refresh` in the 10-per-5-minute per-IP auth budget. Review found
+  that every open tab refreshes about every 30 minutes, so students behind one shared IP (coaching-centre Wi-Fi,
+  colleges, mobile CGNAT) would exhaust the budget for each other; the frontend treats a 429 on refresh as transient.
+- **Decision:** The dedicated budget covers only login, register, forgot-password, reset-password, verify-email and
+  resend-verification. `/auth/refresh` stays under the global per-IP limiter only. Refresh tokens are random,
+  rotating and revocable, so they cannot be guessed.
+- **Consequences:** Refresh abuse is bounded by the global limiter (100/60 s per IP by default). Credential guessing
+  and email-sending endpoints keep the strict budget.

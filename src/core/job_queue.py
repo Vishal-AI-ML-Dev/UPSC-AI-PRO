@@ -25,6 +25,8 @@ from typing import Callable, Optional
 
 from src.core.config import settings
 from src.core.db import SessionLocal
+from src.core.errors import GENERIC_ERROR, UserFacingError
+from src.core.llm import describe_exception
 from src.core.models import Job
 
 logger = logging.getLogger(__name__)
@@ -107,8 +109,11 @@ def _run(job_id: str, work: Callable[[], dict]) -> None:
         result = work()
         _set(job_id, status="done", result=json.dumps(result), error=None)
     except Exception as e:  # noqa: BLE001 - captured into the job record
-        logger.exception("Background job %s failed", job_id)
-        _set(job_id, status="error", error=str(e)[:2000])
+        # Only a UserFacingError's fixed message may reach the client; anything
+        # else (incl. a plain ValueError) could carry paths or provider text.
+        logger.error("Background job %s failed: %s", job_id, describe_exception(e))
+        message = str(e)[:2000] if isinstance(e, UserFacingError) else GENERIC_ERROR
+        _set(job_id, status="error", error=message)
 
 
 def get_job(job_id: str, *, user_id: Optional[str] = None) -> Optional[dict]:

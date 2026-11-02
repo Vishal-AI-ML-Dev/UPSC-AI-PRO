@@ -79,7 +79,7 @@ def _book(confidence):
 
 @pytest.fixture
 def notes_prompt(monkeypatch):
-    monkeypatch.setattr(ug, "_processed_cache", {})
+    ug.clear_cache()
     monkeypatch.setattr(ug, "extract_pdf_text", lambda c, f: (DOC_TEXT, uuid.uuid4().hex))
     monkeypatch.setattr(ug, "create_vector_store", lambda text, **kw: None)
 
@@ -91,7 +91,7 @@ def notes_prompt(monkeypatch):
             return AIMessage(content=queue.pop(0))
 
         monkeypatch.setattr(ug, "get_llm", lambda: RunnableLambda(reply))
-        ug.process_upload(b"%PDF", "my-notes.pdf")
+        ug.process_upload(b"%PDF", "my-notes.pdf", user_id="u1")
         return seen[1]  # the notes prompt
 
     return run
@@ -121,6 +121,6 @@ def test_chat_does_not_name_unconfirmed_book(monkeypatch):
 
     monkeypatch.setattr(ug, "get_llm", lambda: RunnableGenerator(stream))
     book_info = {"book": "Indian Polity", "confidence": "Low", "subject": "Polity", "paper": "GS2"}
-    assert "".join(ug.ask_upload("What is Part III?", "h", book_info=book_info)) == "Answer."
+    assert "".join(ug.ask_upload("What is Part III?", "h", user_id="u1", book_info=book_info)) == "Answer."
     assert "Indian Polity" not in seen[0]
     assert UNCONFIRMED in seen[0]

@@ -41,6 +41,9 @@ os.environ["LANGFUSE_ENABLED"] = "false"
 # production per-IP limit (100/60s) would throttle the suite itself. Limiter logic
 # is covered directly in test_rate_limiter.py.
 os.environ["RATE_LIMIT_REQUESTS"] = "100000"
+# Same for the stricter auth budget (every make_user registers + verifies);
+# the auth limiter itself is covered in test_auth_rate_limit.py.
+os.environ["AUTH_RATE_LIMIT_REQUESTS"] = "100000"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

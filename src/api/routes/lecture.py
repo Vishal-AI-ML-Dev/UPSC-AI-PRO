@@ -2,6 +2,8 @@
 Lecture routes - YouTube lecture processing
 """
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -14,10 +16,22 @@ from src.agents.lecture.graph import (
 )
 from src.api.deps import get_current_user
 from src.api.stream_guard import guard_stream
+from src.core.errors import GENERIC_ERROR, UserFacingError
 from src.core.job_queue import enqueue
+from src.core.llm import describe_exception
 from src.schemas import LectureChatRequest, LectureRequest, LectureTextRequest
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/lecture", tags=["Lecture"])
+
+
+def _sync_error(e: Exception) -> HTTPException:
+    """R10: only a UserFacingError's fixed text is shown; anything else is generic."""
+    if isinstance(e, UserFacingError):
+        return HTTPException(status_code=400, detail=str(e))
+    logger.error("Lecture processing failed: %s", describe_exception(e))
+    return HTTPException(status_code=500, detail=GENERIC_ERROR)
 
 
 def _lecture_payload(result, fallback_video_id=None):
@@ -48,11 +62,12 @@ async def process(
 
     youtube_url = request.youtube_url
     medium = request.medium
+    user_id = current_user["id"]
 
     def _work():
         result = process_lecture(youtube_url, medium)
         try:
-            build_lecture_chat_index(result["video_id"], result.get("_transcript", ""))
+            build_lecture_chat_index(result["video_id"], result.get("_transcript", ""), user_id)
         except Exception:
             pass
         return _lecture_payload(result, video_id)
@@ -61,15 +76,16 @@ async def process(
         try:
             result = process_lecture(youtube_url, medium)
             background_tasks.add_task(
-                build_lecture_chat_index, result["video_id"], result.get("_transcript", "")
+                build_lecture_chat_index,
+                result["video_id"],
+                result.get("_transcript", ""),
+                user_id,
             )
             return _lecture_payload(result, video_id)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        except Exception as e:  # noqa: BLE001 - mapped by the R10 contract
+            raise _sync_error(e) from None
 
-    job_id = enqueue("lecture_process", _work, user_id=current_user.get("id"))
+    job_id = enqueue("lecture_process", _work, user_id=user_id)
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -86,11 +102,12 @@ async def process_text(
     """
     transcript = request.transcript
     medium = request.medium
+    user_id = current_user["id"]
 
     def _work():
         result = process_lecture_from_text(transcript, medium)
         try:
-            build_lecture_chat_index(result["video_id"], result.get("_transcript", ""))
+            build_lecture_chat_index(result["video_id"], result.get("_transcript", ""), user_id)
         except Exception:
             pass
         return _lecture_payload(result)
@@ -99,21 +116,23 @@ async def process_text(
         try:
             result = process_lecture_from_text(transcript, medium)
             background_tasks.add_task(
-                build_lecture_chat_index, result["video_id"], result.get("_transcript", "")
+                build_lecture_chat_index,
+                result["video_id"],
+                result.get("_transcript", ""),
+                user_id,
             )
             return _lecture_payload(result)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        except Exception as e:  # noqa: BLE001 - mapped by the R10 contract
+            raise _sync_error(e) from None
 
-    job_id = enqueue("lecture_process_text", _work, user_id=current_user.get("id"))
+    job_id = enqueue("lecture_process_text", _work, user_id=user_id)
     return {"job_id": job_id, "status": "queued"}
 
 
 @router.post("/chat")
 async def chat(request: LectureChatRequest, user: dict = Depends(get_current_user)):
-    """Chat about lecture (streaming)."""
+    """Chat about lecture (streaming). Pasted transcripts resolve to the caller's own index."""
+    user_id = user["id"]
 
     def generate():
         for chunk in ask_lecture(
@@ -123,6 +142,7 @@ async def chat(request: LectureChatRequest, user: dict = Depends(get_current_use
             chat_history=[m.model_dump() for m in request.chat_history]
             if request.chat_history
             else None,
+            user_id=user_id,
         ):
             yield chunk
 
