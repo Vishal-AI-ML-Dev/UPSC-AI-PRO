@@ -17,8 +17,12 @@
 - DB: every query for user-owned data filters by `user["id"]` (pattern: `src/core/history.py:get_conversation`,
   `src/core/job_queue.py:get_job`).
 - Vector store: a request may only read collections it is entitled to — global corpora (mentor KB, NCERT),
-  or collections owned by the caller. Never let the client or the **model** choose an arbitrary `persist_key`
-  (known gap: `src/graph/tools.py:knowledge_base_tool_fn`, `src/api/routes/upload.py:chat_upload`).
+  or collections owned by the caller. Never let the client or the **model** choose an arbitrary `persist_key`.
+  Pattern (Phase 02, ADR-007): build owned keys server-side from `user["id"]` — `_upload_key` in
+  `src/agents/upload/graph.py`, `_lecture_key` in `src/agents/lecture/graph.py`, `_bank_key` in
+  `src/agents/pyq/graph.py`; validate client ids by format (`PDF_HASH_PATTERN`, `VIDEO_ID_PATTERN` in `src/schemas.py`);
+  model-facing tools search the mentor KB only (`mentor_kb_search` in `src/graph/tools.py`); never fall back to legacy
+  global keys.
 - Checkpoints / cache: keys must include the authenticated user (pattern: `scoped_thread_id` in
   `src/api/routes/chat.py`, `_scope_part` in `src/core/response_cache.py`).
 

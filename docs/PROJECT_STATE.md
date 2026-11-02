@@ -113,18 +113,23 @@ All items below were corrected in place; claim → evidence table in `docs/phase
   ready", topic logs; `src/agents/pyq/graph.py` filename log); `TypeError` text still returned to the model
   (`src/graph/tools.py`); `UPLOAD_ENDPOINTS` hard-codes `/api/v1`; auth limiter is per worker without Redis — LOW.
 
-- (Phase 02, doc drift) `CLAUDE.md:79` ("uploads are keyed by file MD5 with no owner check") and
-  `.claude/rules/security.md:21` ("known gap: knowledge_base_tool_fn, chat_upload") are outdated after Phase 02;
-  not in the plan, so not edited — update with user approval — LOW.
-
 ### Last handoff — 2026-11-02
-- Active phase: 02 Security & ownership — DONE (spec DONE, plan DONE). Next: 03 Request-path performance — spec STUB, plan none.
-- Done this session: Phase 02 end to end — spec/plan (4 revisions + review amendment), deployment check, test-first
-  security tests (8 new files), R1–R15 incl. R12-FC, review fixes (cache lock, refresh outside auth budget, single hash
-  pattern), ADR-007..010, phase report `docs/phase-reports/phase-02-report.md`.
-- Verified: `uv run pytest -q` → `1086 passed, 13 warnings in 146.43s`; ruff `All checks passed!`; compileall exit 0;
-  `npm run build` ✓ built in 3.73s; `npm run lint` clean; security + quality re-review 0 BLOCKING / 0 SHOULD-FIX.
-  Not verified: live Render settings (Q5), Render proxy peer vs `FORWARDED_ALLOW_IPS`, live workflow smoke.
-- In progress / next step: user decides on committing Phase 02; then `/start-phase 3` (not started).
-- Open questions for the user: Q5 (optional — R12-FC in place); commit message for Phase 02.
-- Uncommitted changes: all Phase 02 files (28 modified, 11 new incl. this report; plus `.claude/specs/README.md`); nothing committed.
+- Active phase: 03 Request-path performance — NEXT, not started (spec STUB, plan none). Phase 02 Security & ownership —
+  DONE (spec DONE, plan DONE), committed as `c68f6a3 security: enforce document ownership and abuse limits` (not pushed).
+- Done this session: Phase 02 end to end — spec + plan (`.claude/specs/phase-02-security-ownership.md`,
+  `.claude/plans/phase-02-security-ownership.md`, 4 revisions + review amendment); deployment check; test-first security
+  tests (8 new `tests/test_*` files + AC4 tests in `tests/test_tools.py`); R1–R15 incl. fail-closed MCP (R12-FC) across
+  `src/` (new `src/core/errors.py`), frontend history trimming, `.env.example` placeholder; two review rounds + fixes;
+  ADR-007..010 (`docs/DECISIONS.md`); report `docs/phase-reports/phase-02-report.md`; commit `c68f6a3`.
+  Post-phase documentation cleanup (completed, not yet committed): `CLAUDE.md` known-facts line and
+  `.claude/rules/security.md` vector-store rule now describe the Phase 02 ownership controls; resolved doc-drift backlog
+  item removed from this file.
+- Verified: `uv run pytest -q` → `1086 passed, 13 warnings in 146.43s (0:02:26)`; `uv run ruff check src tests` →
+  `All checks passed!`; compileall exit 0; `npm run build` → `✓ built in 3.73s`; `npm run lint` → `All matched files use
+  Prettier code style!`; security + code-quality re-review: 0 BLOCKING / 0 SHOULD-FIX; `git diff --check` clean for the
+  documentation cleanup.
+  Not verified: live Render dashboard settings (Q5) — UNVERIFIED; Render proxy peer vs `FORWARDED_ALLOW_IPS` — UNVERIFIED;
+  live workflow smoke (`docs/SMOKE_CHECKLIST.md`) — UNVERIFIED; push to remote — not done.
+- In progress / next step: commit the documentation cleanup (on request), then `/start-phase 3`.
+- Open questions for the user: Q5 (optional — R12-FC in place).
+- Uncommitted changes: `M CLAUDE.md`, `M .claude/rules/security.md`, `M docs/PROJECT_STATE.md` (documentation only).

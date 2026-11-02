@@ -76,6 +76,10 @@ Never run: `alembic`/migrations, `uv add`/`npm install`, `docker compose up`, `g
 ## Known facts that surprise newcomers
 - The "supervisor" is one structured LLM routing call to one of 5 subgraphs; there is no parallel or multi-step orchestration.
 - Background jobs run in an in-process thread pool; only status is persisted (`src/core/job_queue.py`).
-- Vector collections are keyed by `persist_key`; uploads are keyed by file MD5 with no owner check.
+- Vector collections are keyed by `persist_key`, built server-side. User-owned collections carry the owner id from the
+  JWT: uploads `upload_<user id>_<md5>`, pasted lectures `lecture_<user id>_paste_<id>`, PYQ banks `pyqbank_<user id>`
+  (YouTube lectures, NCERT and the mentor KB are global). The mentor's `knowledge_base_search` tool and the MCP server
+  cannot select a collection (mentor KB only). Legacy `upload_<md5>` / `lecture_paste_<id>` collections are never read
+  (ADR-007).
 - The Chroma fallback imports `langchain_chroma`, which is not installed — Qdrant (`QDRANT_URL`/`QDRANT_PATH`) is required.
 - Jev / TypeSafe is not present anywhere in the repository.
