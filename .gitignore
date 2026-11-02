@@ -32,4 +32,6 @@ smoke.ps1
 cookies*.txt
 .vscode/
 .idea/
-.claude/
+# Claude Code: the shared workspace (.claude/) is versioned; personal overrides are not.
+.claude/settings.local.json
+.claude/**/*.local.*

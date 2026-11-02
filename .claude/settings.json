@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff check:*)",
+      "Bash(uv run ruff format:*)",
+      "Bash(uv run python -m compileall:*)",
+      "Bash(npm run build)",
+      "Bash(npm run lint)",
+      "Bash(git status)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git check-ignore:*)"
+    ],
+    "ask": [
+      "Edit(./migrations/**)",
+      "Write(./migrations/**)",
+      "Edit(./.github/**)",
+      "Write(./.github/**)",
+      "Edit(./Dockerfile)",
+      "Edit(./frontend/Dockerfile)",
+      "Edit(./docker-compose.yml)",
+      "Edit(./render.yaml)",
+      "Edit(./pyproject.toml)",
+      "Edit(./frontend/package.json)",
+      "Edit(./alembic.ini)",
+      "Edit(./.claude/settings.json)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git merge:*)",
+      "Bash(git rebase:*)",
+      "Bash(git stash:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./frontend/.env)",
+      "Read(./frontend/.env.*)",
+      "Edit(./.env)",
+      "Edit(./.env.*)",
+      "Write(./.env)",
+      "Write(./.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/*.sqlite)",
+      "Read(./**/*.db)",
+      "Edit(./uv.lock)",
+      "Edit(./frontend/package-lock.json)",
+      "Bash(git push:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean:*)",
+      "Bash(rm -rf:*)",
+      "Bash(alembic:*)",
+      "Bash(uv run alembic:*)",
+      "Bash(uv add:*)",
+      "Bash(uv remove:*)",
+      "Bash(uv pip install:*)",
+      "Bash(pip install:*)",
+      "Bash(npm install:*)",
+      "Bash(npm i:*)",
+      "Bash(docker compose up:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(cat .env:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect_paths.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/format_changed.py\"",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint_changed.py\"",
+            "timeout": 90
+          }
+        ]
+      }
+    ]
+  }
+}
