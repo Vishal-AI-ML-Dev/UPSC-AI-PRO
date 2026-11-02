@@ -18,7 +18,9 @@ linked phase report; if it was not measured, it is marked **UNVERIFIED**.
 | Memory / CPU per request, multi-worker HTTP behaviour | **UNVERIFIED** | — |
 | Background-job reliability: false reaps, dead-job recovery time, heartbeat tick cost, retry policy (offline, multi-process, SQLite) | Measured (Phase 04) | [§ Background-job reliability benchmark](#background-job-reliability-benchmark-offline-multi-process-sqlite) |
 | Background jobs on Postgres / Render with `WEB_CONCURRENCY>1` | **UNVERIFIED** — never measured | — |
-| Offline test suite size | `1182 passed` (Phase 04 close run) | [phase-04 report](phase-reports/phase-04-report.md#gate-results-final-run-verbatim) |
+| Mentor routing: misrouted messages, router calls per message, router input size, graph overhead (offline, stubbed models) | Measured (Phase 05) | [§ Mentor routing benchmark](#mentor-routing-benchmark-phase-05-offline-stubbed-models) |
+| Live router latency and money cost per message (Gemini / Groq) | **UNVERIFIED** — needs keys | — |
+| Offline test suite size | `1212 passed` (Phase 05 review round 2 run) | [phase-05 report](phase-reports/phase-05-report.md) |
 
 **Do not cite the synthetic numbers as production performance.** They show how the request path behaves when work
 blocks (queueing, event-loop stalls, the Upstash thread budget), on one machine, with fake dependencies.
@@ -181,3 +183,53 @@ Before the fix, a probe against the pre-Phase-04 code gave these results (phase-
 - A transient `LLMTimeoutError` was not retried.
 
 Postgres, real Render deploy overlap and `WEB_CONCURRENCY>1` under HTTP load are **UNVERIFIED**.
+
+## Mentor routing benchmark (Phase 05, offline, stubbed models)
+Harness: `scripts/bench_routing.py` (Phase 05). It runs 20 conversations of 10 mixed messages (planner, mentor,
+current affairs, evaluator) through the **real compiled supervisor graph** on an `InMemorySaver` checkpointer. The
+router LLM and every specialist are offline stubs, so it measures routing behaviour and graph overhead, **not model
+latency**. Isolation is the same as `bench_jobs.py`: allow-listed environment, offline settings, `chdir` into a temp
+dir. No network, no keys. Token counts are **estimates** (characters / 4), not a tokenizer.
+
+```bash
+uv run python scripts/bench_routing.py                       # defaults: --conversations 20
+uv run python scripts/bench_routing.py --out <path outside the repo>.json
+```
+
+### Recorded results
+2026-11-02, Windows 11, Python 3.13.13. "Before" ran on the unchanged pre-Phase-05 code; "after" on the Phase 05
+working tree (three runs, results identical except overhead).
+
+| Metric (200 messages, 20 conversations) | Before (route persisted in checkpoint) | After (per-message routing) |
+|---|---|---|
+| Messages answered by the wrong specialist | **160 / 200 (80.0 %)** | **0 / 200 (0 %)** |
+| Router LLM calls per conversation / per message | 1 / 0.1 | 10 / 1.0 |
+| Route labels | 5 (incl. unreachable `rag`) | 4 |
+| Router system prompt (chars) | 551 | 462 |
+| Structured-output schema, JSON (chars) | 471 | 406 |
+| Router input per call, mean (system + message, chars) | 609 | 508.8 |
+| Router input per call incl. schema, est. tokens | ~270 | ~229 (−15 %) |
+| Offline graph overhead per message, p50 / p95 ms | 2.49 / 2.91 | 2.47 / 3.00 (runs 2–3: 2.45 / 2.82, 2.58 / 3.07) |
+
+`ALL PASS` (0 misrouted and 1.0 router calls per message): before `False`, after `True` (3 / 3 runs).
+
+### Impact of per-message routing (latency, tokens, cost)
+- **Correctness.** Before Phase 05, the first message's route was saved in the checkpoint and reused for every later
+  message in the conversation, so the router ran once per conversation. In this mix that sent 80 % of messages to the
+  wrong specialist.
+- **Router calls.** One extra fast-model call (`get_fast_llm()`, `llm_fast_model`, default `gemini-2.5-flash-lite`,
+  Groq fallback) for every message after the first. A 10-message conversation goes from 1 to 10 router calls.
+- **Tokens.** About 229 input tokens per router call (estimate: 462-char system prompt + ~406-char schema + the
+  message; longer messages add about 1 token per 4 characters). Output is one small structured `RouteDecision`
+  (a few tokens; not measured). Per 10-message conversation, router input goes from ~270 to ~2,290 estimated tokens.
+  For scale, the mentor's system prompt alone is 2,858 chars (~715 tokens) before history and tool results, and it
+  runs on the main tier (`get_llm()`), so the router stays a small share of each mentor message. Not measured.
+- **Latency.** Each message now waits for one fast-model round trip before its specialist starts. That call is capped
+  by `llm_request_timeout_seconds` (default 45 s); a timeout ends the request (no cascade). The real Gemini/Groq
+  round-trip time is **UNVERIFIED**. Graph overhead without models is unchanged (about 2.5 ms p50).
+- **Cost.** Extra cost per message is about `(input_tokens × fast-model input price) + (output_tokens × fast-model output
+  price)`, with input ≈ 229 + message chars / 4. Provider prices and the real token counts are **UNVERIFIED** (no
+  keys, no billing data). The comparison is not "cost added for nothing": before, messages 2…N ran a full specialist
+  that was often the wrong one (for example the planner's hours prompt, or a whole daily current-affairs digest).
+- **Planned check.** Live per-message router latency and token usage can be read from Langfuse traces
+  (`make_config` already tags every run) once keys are configured. Phase 08 (evals) owns routing-accuracy measurement.

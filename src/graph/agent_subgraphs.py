@@ -1,17 +1,23 @@
-"""Form-style agent subgraphs: Planner, Evaluator, Current Affairs.
+"""Mentor chat specialists that wrap form features: Planner, Evaluator, Current Affairs.
 
-Unlike the mentor and RAG agents (free-text question in, answer out), these
-three are driven by structured form inputs in the original app. To fit them
-into the shared graph contract without rewriting their business logic, each
-subgraph reads its parameters from ``state['task_inputs']`` and wraps the
-existing streaming functions, collecting the streamed chunks into a single
-answer string.
+Used only by the Mentor chat supervisor (``src/graph/supervisor.py``). The
+Planner, Answer Evaluator and Current Affairs PAGES do not come through here:
+their routes call the same feature functions directly with form inputs.
 
-Expected ``task_inputs`` shapes:
-    planner          {goal, hours, optional, weak, attempt_number}
-    evaluator        {question, answer, marks?, keywords?, word_limit?}
-                     (marks present -> Mains rubric; otherwise basic evaluation)
-    current_affairs  {mode: "daily"|"editorial"|"monthly", date|topic|month+year}
+Mentor chat sends only the free-text message, so each node parses its inputs
+from ``state['question']`` with a deterministic parser (no model call) and wraps
+the existing streaming feature function, collecting the chunks into one answer:
+    planner          ``planner_inputs_from_text``  -> goal, hours?, attempt_number?
+    evaluator        ``evaluator_inputs_from_text`` -> question, answer
+                     ("Question: ... Answer: ..." markers; basic evaluation)
+    current_affairs  ``current_affairs_inputs_from_text`` -> daily | editorial | monthly
+A required input that is missing is asked for in the reply instead of guessed.
+Every reply stores the student's question (once) followed by the answer
+(``_reply``), so the mentor's bounded history sees question -> answer pairs.
+
+HITL (``HITL_ENABLED``, off by default) is NOT supported by Mentor chat:
+``/agent/chat/stream`` has no resume path for a LangGraph ``interrupt``. Keep it
+off in deployments that serve Mentor chat (Phase 05, ADR-014).
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from __future__ import annotations
 import logging
 import re
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from src.agents.current_affairs.graph import (
@@ -29,10 +35,11 @@ from src.agents.current_affairs.graph import (
     get_monthly_summary,
     today_label,
 )
-from src.agents.evaluator.graph import evaluate_answer, evaluate_mains
+from src.agents.evaluator.graph import evaluate_answer
 from src.agents.planner.graph import generate_plan
 from src.core.config import settings
 from src.graph.state import AgentState
+from src.graph.tools import _should_seed_question
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +48,23 @@ def _consume(generator) -> str:
     """Collect a streaming generator of text chunks into a single string."""
     parts = [chunk for chunk in generator if isinstance(chunk, str)]
     return "".join(parts)
+
+
+def _reply(state: AgentState, text: str) -> dict:
+    """State update for a specialist answer: the student's question, then the answer.
+
+    Recording the question keeps the thread a sequence of question -> answer
+    turns, so the mentor's bounded history (``tools.bound_history``) pairs every
+    earlier answer with its own question. The question is added only when it is
+    not already the latest unanswered human message (same rule the mentor agent
+    uses), so each question is stored exactly once.
+    """
+    question = state.get("question", "")
+    messages: list = []
+    if _should_seed_question(list(state.get("messages") or []), question):
+        messages.append(HumanMessage(content=question))
+    messages.append(AIMessage(content=text))
+    return {"answer": text, "messages": messages}
 
 
 # ---------------------------------------------------------------------------- #
@@ -155,7 +179,7 @@ def build_planner_subgraph(checkpointer=None):
     """Subgraph wrapping the study-plan generator."""
 
     def planner_node(state: AgentState) -> dict:
-        params = state.get("task_inputs") or planner_inputs_from_text(state.get("question", ""))
+        params = planner_inputs_from_text(state.get("question", ""))
         # HITL: a study plan is useless without a goal + daily hours, so pause
         # to ask for them when missing (no-op unless hitl_enabled).
         params = _maybe_interrupt_for_params(
@@ -165,8 +189,7 @@ def build_planner_subgraph(checkpointer=None):
         )
         # Never assume a number of hours the student did not give.
         if not str(params.get("hours", "")).strip():
-            text = PLANNER_NEEDS_HOURS
-            return {"answer": text, "messages": [AIMessage(content=text)]}
+            return _reply(state, PLANNER_NEEDS_HOURS)
         text = _consume(
             generate_plan(
                 goal=params.get("goal", state.get("question", "")),
@@ -176,7 +199,7 @@ def build_planner_subgraph(checkpointer=None):
                 attempt_number=str(params.get("attempt_number", "1")),
             )
         )
-        return {"answer": text, "messages": [AIMessage(content=text)]}
+        return _reply(state, text)
 
     graph = StateGraph(AgentState)
     graph.add_node("planner", planner_node)
@@ -187,38 +210,21 @@ def build_planner_subgraph(checkpointer=None):
 
 # ============================ Evaluator =======================================
 def build_evaluator_subgraph(checkpointer=None):
-    """Subgraph wrapping answer evaluation (basic + Mains rubric)."""
+    """Subgraph wrapping basic answer evaluation for Mentor chat.
+
+    Mentor chat only provides "Question: ... Answer: ..." text, so there are no
+    marks / word limit and the Mains rubric (``evaluate_mains``) is never used
+    here; it stays on the Answer Evaluator page (``src/api/routes/evaluator.py``).
+    """
 
     def evaluator_node(state: AgentState) -> dict:
-        params = state.get("task_inputs") or evaluator_inputs_from_text(state.get("question", ""))
+        params = evaluator_inputs_from_text(state.get("question", ""))
         if not str(params.get("answer", "")).strip():
             # No answer text found: explain the format instead of claiming
             # the student wrote nothing.
-            text = EVALUATOR_NEEDS_FORMAT
-            return {"answer": text, "messages": [AIMessage(content=text)]}
-        # HITL: Mains rubric scoring depends on the marks + word limit, so
-        # confirm them before grading (no-op unless hitl_enabled). Only prompt
-        # when this looks like a Mains request (marks hint present).
-        if params.get("marks") or params.get("word_limit"):
-            params = _maybe_interrupt_for_params(
-                params,
-                ["marks", "word_limit"],
-                "Mains evaluation needs the marks (e.g. 10/15) and word limit.",
-            )
-        question = params.get("question", state.get("question", ""))
-        answer = params.get("answer", "")
-        if params.get("marks"):
-            generator = evaluate_mains(
-                question=question,
-                answer=answer,
-                marks=int(params.get("marks", 10)),
-                keywords=params.get("keywords"),
-                word_limit=int(params.get("word_limit", 150)),
-            )
-        else:
-            generator = evaluate_answer(question=question, answer=answer)
-        text = _consume(generator)
-        return {"answer": text, "messages": [AIMessage(content=text)]}
+            return _reply(state, EVALUATOR_NEEDS_FORMAT)
+        text = _consume(evaluate_answer(question=params["question"], answer=params["answer"]))
+        return _reply(state, text)
 
     graph = StateGraph(AgentState)
     graph.add_node("evaluator", evaluator_node)
@@ -232,9 +238,7 @@ def build_current_affairs_subgraph(checkpointer=None):
     """Subgraph wrapping daily CA, editorials, and the monthly digest."""
 
     def current_affairs_node(state: AgentState) -> dict:
-        params = state.get("task_inputs") or current_affairs_inputs_from_text(
-            state.get("question", "")
-        )
+        params = current_affairs_inputs_from_text(state.get("question", ""))
         mode = (params.get("mode") or "daily").lower()
         if mode == "editorial":
             generator = get_editorial(params.get("topic", ""))
@@ -243,7 +247,7 @@ def build_current_affairs_subgraph(checkpointer=None):
         else:
             generator = get_daily_ca(params.get("date") or today_label())
         text = _consume(generator)
-        return {"answer": text, "messages": [AIMessage(content=text)]}
+        return _reply(state, text)
 
     graph = StateGraph(AgentState)
     graph.add_node("current_affairs", current_affairs_node)

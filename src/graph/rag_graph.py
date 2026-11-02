@@ -1,16 +1,19 @@
 """Reusable RAG subgraph factory with CRAG self-correction.
 
-One factory powers every retrieval agent (NCERT, Lecture, Upload, PYQ). Each
-caller pre-computes a Chroma ``persist_key`` (using the same
-``make_persist_key`` helper the legacy agents already use) and places it on the
-state; the subgraph then loads that collection and answers from it.
+Where it runs: ONLY in the LLM eval harness (``src/eval/llm_eval.py``, ADR-003).
+No HTTP route reaches it: NCERT, Lecture, Upload and PYQ answer through their own
+functions in ``src/agents/<feature>/graph.py``, and the Mentor chat supervisor has
+no ``rag`` route since Phase 05 (ADR-014). The caller places a Qdrant collection
+key on ``state['persist_key']``; the subgraph loads that collection and answers
+from it. Any future HTTP caller must build that key server-side from the
+authenticated user (ADR-007), never take it from the client or the model.
 
 Graph flow (Corrective RAG / CRAG)::
 
     START -> retrieve -> grade -> (web_search?) -> generate -> verify_grounding -> END
 
 Nodes:
-    retrieve   Load the Chroma collection for ``state['persist_key']`` and run
+    retrieve   Load the vector collection for ``state['persist_key']`` and run
                a relevance-scored search via ``similarity_search_with_sources``
                (re-using the existing 0.3 threshold + ``grounded`` flag).
     grade      Structured-output LLM judges whether the retrieved context can
@@ -211,7 +214,7 @@ def build_rag_subgraph(
         )
 
     def retrieve_node(state: AgentState) -> dict:
-        """Load the active Chroma collection and run a relevance-scored search."""
+        """Load the active vector collection and run a relevance-scored search."""
         persist_key = state.get("persist_key")
         if not persist_key:
             logger.info("[%s] no persist_key on state; skipping retrieval", label)

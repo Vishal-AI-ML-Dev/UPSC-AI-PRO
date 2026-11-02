@@ -11,12 +11,14 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | 02 | Security & ownership | DONE (2026-11-02) — `docs/phase-reports/phase-02-report.md` |
 | 03 | Request-path performance | DONE (2026-11-02; commit `2ac904e`) — `docs/phase-reports/phase-03-report.md` |
 | 04 | Durable jobs | DONE (2026-11-02) — `docs/phase-reports/phase-04-report.md` |
-| 05–09 | See `.claude/specs/README.md` | STUB |
+| 05 | Agent architecture truthfulness | DONE (2026-11-02) — `docs/phase-reports/phase-05-report.md` |
+| 06 | RAG quality — `.claude/specs/phase-06-rag-quality.md` | **NEXT** — STUB, not started (wait for the user) |
+| 07–09 | See `.claude/specs/README.md` | STUB |
 
 ## The 8 workflows (must not regress)
 | Workflow | Backend entry | Frontend | Status (last verified) |
 |---|---|---|---|
-| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close) |
+| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close); every message routed afresh — the first message's route no longer sticks to the conversation; supervisor has 4 routes, no `rag`; specialists store the question once, mentor history = coherent Q/A pairs; replies never echo the question (Phase 05, ADR-014); answers arrive whole, not token by token (pre-existing, backlog MED); offline smoke PASS 2026-11-02 (Phase 05 close) |
 | NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed) |
 | PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02; parse/bank status/clear off the event loop, bank `sync=true` offloaded (Phase 03); bank upload job: heartbeat lease, deadline, no auto-retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close) |
 | Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02; `*/sync` endpoints off the event loop (Phase 03) (Phase 03 close) |
@@ -25,7 +27,8 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02; `process`/`process-text` off the event loop (Phase 03); lecture jobs: heartbeat lease, deadline, 1 transient retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close) |
 | PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02; upload `sync=true` offloaded (Phase 03); upload job: heartbeat lease, deadline, no auto-retry (Phase 04 Amendment 1); offline smoke PASS 2026-11-02 (Phase 04 close) |
 
-Test suite status (2026-11-02, Phase 04 close): `1182 passed, 13 warnings in 128.48s (0:02:08)` (Phase 03 close: `1113 passed`;
+Test suite status (2026-11-02, Phase 05 close): see the Phase 05 report gate results (Phase 04 close: `1182 passed`;
+Phase 03 close: `1113 passed`;
 Phase 02 close: `1086 passed`;
 Phase 01 close: `930 passed`).
 Engineering metrics (synthetic request-path benchmark, how to rerun, UNVERIFIED production metrics):
@@ -35,10 +38,15 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 
 ## Verified architecture facts
 - Backend root is `src/` (ADR-001). API prefix `/api/v1`; all feature routers JWT-protected in `src/api/main.py`.
-- "Supervisor" (`src/graph/supervisor.py`) = one structured LLM routing call → one of mentor / planner /
-  evaluator / current_affairs / rag. No parallel or multi-step orchestration.
-- The `rag` route is unreachable over HTTP (no route sets `persist_key`); CRAG (`src/graph/rag_graph.py`) only
-  runs in `src/eval/llm_eval.py`.
+- "Supervisor" (`src/graph/supervisor.py`) = one structured LLM routing call **per message** → one of mentor /
+  planner / evaluator / current_affairs (+ optional plan_execute, off). No parallel or multi-step orchestration.
+  A route saved in the checkpoint is never read as input (Phase 05, ADR-014).
+- No `rag` supervisor route (removed Phase 05). CRAG (`src/graph/rag_graph.py`) only runs in `src/eval/llm_eval.py`.
+- `task_inputs` removed (Phase 05); planner / evaluator / CA specialists parse the chat message. HITL is not
+  supported by Mentor chat (no resume path; `HITL_ENABLED` off).
+- Mentor chat answers are delivered whole, not token by token: `/agent/chat/stream` streams with `subgraphs=False`
+  and every specialist is a nested subgraph (pre-existing; backlog MED). Only model output is forwarded; stored
+  student questions are never echoed (Phase 05, AC17).
 - The only autonomous agent is the ReAct mentor in `src/graph/tools.py:build_tool_agent` (tools: `web_search`,
   `knowledge_base_search`; cap 3 rounds).
 - `src/agents/*/graph.py` are plain functions, not LangGraph. NCERT/PYQ/Lecture/Upload are called directly by routes.
@@ -157,37 +165,81 @@ All items below were corrected in place; claim → evidence table in `docs/phase
   added them by hand at Phase 04 close. Claude could not read the content; it passed `git diff --check`. The user should
   confirm the exact lines — LOW.
 
+- (Phase 05, product feature) **Document-aware Mentor chat**: let a Mentor message target one of the caller's own
+  documents (upload / lecture / NCERT) via the CRAG subgraph. Needs a request field, server-built owned keys
+  (ADR-007), a frontend picker and ownership tests. Candidate Phase 07 — FEATURE.
+- (Phase 05) HITL (`HITL_ENABLED`) would pause planner/evaluator in Mentor chat with no resume path in
+  `src/api/routes/chat.py` (documented as unsupported; behaviour with HITL on UNVERIFIED). Keep it off — LOW.
+- (Phase 05) Optional `plan_execute` route (`PLAN_EXECUTE_ENABLED`, **off by default**): its answer node
+  (`synthesize`) is not in `chat.py:_FINAL_NODES`, so the answer is delivered from the final-state fallback (as
+  for every route today — no route is token-streamed, see the MED streaming item below); and it does not store
+  the student's question in history (separate item below). Behaviour over HTTP with it enabled is UNVERIFIED — LOW.
+- ~~(Phase 05) `agent_subgraphs.py` evaluator Mains branch unreachable from Mentor chat~~ RESOLVED in Phase 05
+  review (branch + `evaluate_mains` import removed from the Mentor node; the Answer Evaluator page keeps Mains).
+- (Phase 05 review NIT) Stale-answer snapshot: `src/api/routes/chat.py` `generate()` treats the second "values"
+  snapshot onward as this turn's state, but the post-supervisor snapshot still carries the PREVIOUS turn's
+  `answer`. If a specialist ever ends without an `answer` and streams nothing, the previous reply is re-sent.
+  Not triggered today (every specialist sets `answer`). Fix: compare against `prior_answer` or reset `answer` in
+  `supervisor_node` — LOW.
+- (Phase 05 review, security LOW) Router prompt injection: the student's text reaches the router unfenced
+  (`src/graph/supervisor.py:supervisor_node`). Output is limited to the 4-value `RouteDecision` literal, all routes
+  are allowed for the caller, and it is the caller's own text, so the impact is at most a different specialist for
+  that message. Accepted by design; revisit if a route ever gains privileges — LOW.
+- (Phase 05 review) Concurrent test runs interfere: every `uv run pytest` uses the same throwaway SQLite file
+  (`tests/conftest.py`: `<tempdir>/upsc_smoke_test.db`, deleted at start). Two suites at once (e.g. a reviewer agent
+  and the main session) produced 2 failures + 1 error that did not reproduce alone. Fix: per-run unique DB name
+  (e.g. `upsc_smoke_test_<pid>.db`) — LOW.
+- (Phase 05 review round 2) `src/graph/plan_execute.py` (`PLAN_EXECUTE_ENABLED`, off by default) returns only
+  `AIMessage(answer)`, not the question. With the first-answer rule in `bound_history`, such an answer is an
+  orphan and is dropped from later mentor windows (before: paired with the wrong question). Fix: store the
+  question like `agent_subgraphs._reply` when plan_execute is enabled — LOW.
+- (Phase 05 final review, pre-existing, not a Phase 05 regression) **Mentor chat answers are not shown token by
+  token.** `src/api/routes/chat.py` streams the supervisor with `stream_mode=["messages","values"]` and the default
+  `subgraphs=False`. Every specialist (mentor tool agent, planner, evaluator, current affairs) is a nested subgraph,
+  so LangGraph does not emit their model tokens at this level (`langgraph/pregel/_messages.py`, nested `ns`
+  skipped). Planner / evaluator / CA answers arrive as one completed message; mentor answers arrive whole via the
+  final-state fallback (the top-level node `mentor` is not in `_FINAL_NODES`; `"agent"` only matches test fake
+  graphs). Offline probe (2026-11-02): mentor `streamed_chunks=0`, planner 1 chunk. Impact: user-visible wait until
+  generation completes (each model call capped at 45 s). README / `chat.py` docstring corrected at Phase 05 close.
+  Not fixed in Phase 05 (needs a streaming design: e.g. `subgraphs=True` + namespace-aware filtering) — MED.
+- (Phase 05 final review NIT) `src/api/routes/chat.py:_is_input_message` drops known input types (`human` / `system` /
+  `tool` prefixes) instead of allowing only assistant output (`ai` / `AIMessageChunk`); a stricter allow-list would
+  also block e.g. `ChatMessage` / `FunctionMessage` (not produced today) — LOW.
+- (Phase 05 final review NIT) No test asserts the response-cache CONTENT for chat: `cache.set(answer=...)` is the same
+  buffer as the asserted response body, but a fake-cache assertion would pin AC17 directly — LOW.
+- (Phase 05 review round 2, security LOW, pre-existing) `src/graph/tools.py` `agent_node`:
+  `logger.warning("extra_context failed: %s", exc)` logs the raw exception text. Fix: `describe_exception(exc)` — LOW.
+
 ### Last handoff — 2026-11-02
-- Active phase: none in progress. Phase 04 Durable background jobs — DONE (spec DONE, plan DONE with Amendments 1–2
-  approved by the user; report `docs/phase-reports/phase-04-report.md`; ADR-013). Next: Phase 05 — spec STUB; not
-  started (wait for the user).
+- Active phase: none in progress. Phase 05 Agent architecture truthfulness — DONE (spec DONE, plan DONE with
+  Amendment 1; report `docs/phase-reports/phase-05-report.md`; ADR-014 + addendum). Next: Phase 06 RAG quality —
+  spec STUB, not started (wait for the user).
 - Done this session:
-  - Phase 04 end to end, test-first, with pre-fix failures recorded in the report.
-  - `src/core/job_queue.py` (heartbeat lease, lease-based and owner-only on-read recovery, conditional transitions,
-    transient allow-list, retry capped at 3, deadline, graceful shutdown that keeps running jobs heartbeated).
-  - `config.py` (4 settings), `job_handlers.py`, `src/api/main.py` (lifespan shutdown).
-  - `routes/pyq.py` and `routes/upload.py`: `retries=0`.
-  - `tests/test_job_queue_durability.py` (69 tests).
-  - `scripts/bench_jobs.py`; `docs/ENGINEERING_METRICS.md` (jobs section); ADR-013; report.
-  - Two review rounds per reviewer.
-  - The user added the `.env.example` placeholders by hand.
+  - Phase 05 end to end, test-first: per-message routing (`src/graph/supervisor.py`), `rag` route and `task_inputs`
+    removed (`supervisor.py`, `agent_subgraphs.py`, `state.py`), specialists store the question once
+    (`agent_subgraphs._reply`), `bound_history` keeps each turn's own answer (`src/graph/tools.py`), only model
+    output streamed (`src/api/routes/chat.py`), secret-safe routing-failure log.
+  - Tests: `tests/test_supervisor_routing.py` (new), `tests/test_mentor_history_bound.py`,
+    `tests/test_mentor_routes.py` (rewritten / re-targeted, none deleted).
+  - `scripts/bench_routing.py` (new); docs: README, ARCHITECTURE, ENGINEERING_METRICS, DECISIONS (ADR-014),
+    this file, spec, plan, `.claude/specs/README.md`, phase report.
+  - Reviews: round 1 + round 2 (security + code quality) and a final independent review: 0 BLOCKING, 0 SHOULD-FIX.
 - Verified:
-  - `uv run pytest -q` → `1182 passed, 13 warnings in 128.48s (0:02:08)` (also 125.24 s and 126.66 s runs).
-  - focused → `215 passed, 3 warnings in 41.05s`.
-  - `ruff check src tests` and `ruff check scripts/bench_jobs.py` → `All checks passed!`. compileall exit 0.
-    `git diff --check` exit 0.
-  - `scripts/bench_jobs.py` → `ALL PASS: True` (5 runs).
-  - All 14 ACs MET.
-- Not verified:
-  - `.env.example` content: reading or diffing it is denied to Claude.
-  - Postgres lease comparison; Render deploy overlap; `WEB_CONCURRENCY>1` under HTTP load; live smoke.
-  - Frontend build (frontend unchanged).
-- In progress / next step: the user confirms `.env.example` with `git diff -- .env.example`, reviews and (if wanted)
-  commits Phase 04; then `/start-phase 5` when the user asks.
-- Open questions for the user: none (only the `.env.example` self-check above).
+  - `uv run pytest -q` → `1212 passed, 13 warnings in 130.71s (0:02:10)` (closing run).
+  - `uv run ruff check src tests` → `All checks passed!`; compileall exit 0; `scripts/bench_routing.py` →
+    `ALL PASS: True` (0 / 200 misrouted, 1.0 router calls per message).
+  - No runtime code changed at close (docstring-only `chat.py` edit; AST-identical check `True`).
+- Not verified: live-model routing quality, router latency, token usage and $ cost; HITL and plan_execute behaviour
+  over HTTP; old Postgres checkpoints; live workflow smoke; frontend build (frontend unchanged). No production
+  verification claimed.
+- In progress / next step: the user reviews and (if wanted) commits Phase 05; then `/start-phase 6` when the user
+  asks.
+- Open questions for the user: none.
 - Uncommitted changes:
-  - Modified: `.env.example` (by the user), `src/` 6 files, spec, `.claude/specs/README.md`,
-    `docs/{DECISIONS,ENGINEERING_METRICS,PROJECT_STATE}.md`.
-  - Untracked: plan, `docs/phase-reports/phase-04-report.md`, `scripts/bench_jobs.py`,
-    `tests/test_job_queue_durability.py`.
+  - Modified: `.claude/specs/README.md`, `.claude/specs/phase-05-agent-architecture.md`, `ARCHITECTURE.md`,
+    `README.md`, `docs/{DECISIONS,ENGINEERING_METRICS,PROJECT_STATE}.md`, `src/api/routes/chat.py`,
+    `src/graph/{agent_subgraphs,rag_graph,state,supervisor,tools}.py`,
+    `tests/{test_mentor_history_bound,test_mentor_routes}.py`.
+  - Untracked: `.claude/plans/phase-05-agent-architecture.md`, `docs/phase-reports/phase-05-report.md`,
+    `scripts/bench_routing.py`, `tests/test_supervisor_routing.py`.
   - Nothing committed or pushed.

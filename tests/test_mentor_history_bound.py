@@ -76,19 +76,78 @@ def test_never_starts_with_a_non_human_message():
     assert _contents(out) == [("human", "q1"), ("ai", "a1"), ("human", "now")]
 
 
-def test_earlier_turn_keeps_only_its_last_answer():
-    # Other supervisor routes append an answer without a human message; only the
-    # last answer of an earlier turn may reach the model.
+def test_earlier_turn_keeps_only_its_own_answer():
+    # Checkpoints written before Phase 05 hold other-route answers without their
+    # question. Only ONE answer per earlier turn may reach the model, and it is the
+    # turn's own (first) answer, so the question stays paired with its reply.
+    # (Phase 03 kept the last answer; changed in Phase 05 review S1, user decision.)
     history = [*_turn(1), AIMessage(content="planner answer"), HumanMessage(content="now")]
     out = bound_history(history, 5)
-    assert _contents(out) == [("human", "q1"), ("ai", "planner answer"), ("human", "now")]
+    assert _contents(out) == [("human", "q1"), ("ai", "a1"), ("human", "now")]
 
 
 def test_many_other_route_answers_do_not_bypass_the_bound():
     others = [AIMessage(content=f"other {i}") for i in range(100)]
     history = [*_turn(1), *others, HumanMessage(content="now")]
     out = bound_history(history, 6)
-    assert _contents(out) == [("human", "q1"), ("ai", "other 99"), ("human", "now")]
+    assert _contents(out) == [("human", "q1"), ("ai", "a1"), ("human", "now")]
+
+
+def _route_turn(q: str, a: str) -> list:
+    """A planner / evaluator / CA turn as stored since Phase 05: question + answer."""
+    return [HumanMessage(content=q), AIMessage(content=a)]
+
+
+def test_mixed_routes_keep_coherent_pairs():
+    history = [
+        *_turn(1),
+        *_route_turn("plan please", "PLAN"),
+        *_turn(2),
+        *_route_turn("evaluate this", "EVAL"),
+        HumanMessage(content="now"),
+    ]
+    assert _contents(bound_history(history, 6)) == [
+        ("human", "q1"),
+        ("ai", "a1"),
+        ("human", "plan please"),
+        ("ai", "PLAN"),
+        ("human", "q2"),
+        ("ai", "a2"),
+        ("human", "evaluate this"),
+        ("ai", "EVAL"),
+        ("human", "now"),
+    ]
+
+
+def test_multiple_unanswered_questions_between_mixed_routes():
+    # Questions that never got an answer (e.g. timeouts), around route turns.
+    history = [
+        *_route_turn("plan please", "PLAN"),
+        HumanMessage(content="lost 1"),
+        *_turn(1)[:-1],  # q1 stopped after its tool round: no answer
+        HumanMessage(content="lost 2"),
+        *_route_turn("evaluate this", "EVAL"),
+        HumanMessage(content="now"),
+    ]
+    out = bound_history(history, 6)
+    assert _contents(out) == [
+        ("human", "plan please"),
+        ("ai", "PLAN"),
+        ("human", "lost 1"),
+        ("human", "q1"),
+        ("human", "lost 2"),
+        ("human", "evaluate this"),
+        ("ai", "EVAL"),
+        ("human", "now"),
+    ]
+    assert all(m.type != "tool" and not getattr(m, "tool_calls", None) for m in out)
+    # Unanswered questions count as turns under the six-turn policy.
+    assert _contents(bound_history(history, 2)) == [
+        ("human", "lost 2"),
+        ("human", "evaluate this"),
+        ("ai", "EVAL"),
+        ("human", "now"),
+    ]
 
 
 def test_unanswered_earlier_questions_are_kept_alone_and_count_as_turns():

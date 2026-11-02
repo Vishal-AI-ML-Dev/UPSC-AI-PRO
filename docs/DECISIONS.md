@@ -182,3 +182,46 @@ Append new ADRs; never rewrite accepted ones — supersede them.
   - New settings `JOB_WORKERS`, `JOB_HEARTBEAT_SECONDS`, `JOB_LEASE_SECONDS`, `JOB_RETRY_BACKOFF_SECONDS` (safe
     defaults in `src/core/config.py`). The user documents them as commented placeholders in `.env.example`, which
     Claude is not permitted to read or edit.
+
+## ADR-014 — Mentor chat routes every message afresh; the supervisor has 4 reachable routes
+2026-11-02 · Accepted (Phase 05; user decisions Q1–Q4)
+- **Context:**
+  - `supervisor_node` treated `state['route']` as a forced route. The checkpointer saves each message's route, so
+    from the second message of a conversation the previous route was reused and the router never ran again.
+    Offline benchmark: 80 % of messages answered by the wrong specialist; the endpoint test reproduced a Question/
+    Answer message getting the planner's "I need your daily study hours" reply.
+  - The `rag` route needed `state['persist_key']`, which no API sets, so it silently became `mentor`.
+  - `state['task_inputs']` was never set by any caller; the specialists always parsed the message text.
+  - Docs and docstrings claimed forced routes, a `task_inputs` contract, a reachable `rag` route and a
+    "full multi-agent system".
+- **Decision:**
+  - **Per-message routing:** the router runs for every message. `route` is an output of the current message and is
+    never read as an input. No forced-route input exists (no caller used it).
+  - **Q1 = A:** remove `rag` from the supervisor (route literal, router prompt, node). Keep
+    `src/graph/rag_graph.py` for the eval harness (ADR-003). Document-aware Mentor chat is a future product
+    feature (backlog, candidate Phase 07); any HTTP caller of CRAG must build the key server-side (ADR-007).
+  - **Q2:** remove `task_inputs` from `AgentState` and the specialists; the text parsers are the input path.
+  - **Q3:** Mentor chat does not support HITL (`HITL_ENABLED`, off by default): `/agent/chat/stream` has no resume
+    path. Documented, not implemented.
+  - **Q4:** `src/api/routes/mentor.py` stays unchanged and unregistered (ADR-006, Phase 09).
+  - NCERT / PYQ / Lecture / Upload and the Planner / Evaluator / Current Affairs pages stay direct function calls.
+- **Consequences:**
+  - One fast-model router call per message instead of per conversation (~229 estimated input tokens per call;
+    live latency and price UNVERIFIED) — `docs/ENGINEERING_METRICS.md` → Mentor routing benchmark.
+  - Conversation history and the student profile are still carried in the checkpointed state.
+  - Old checkpoints may still hold `route` / `task_inputs`; neither is read any more.
+  - Re-adding a "UI picks the specialist" feature needs a non-persisted input, not `state['route']`.
+- **Addendum (review round 1, user-approved):**
+  - Planner / evaluator / current-affairs replies store the student's question (once; same rule as the mentor's
+    `_should_seed_question`) before the answer, so a mixed conversation is a sequence of question → answer turns.
+  - `bound_history` keeps each earlier turn's FIRST final answer. This supersedes the Phase 03 "last answer" rule
+    (ADR-011): for pre-Phase-05 checkpoints, orphan other-route answers are dropped instead of being paired with
+    the wrong question. The bound is unchanged.
+  - The Mentor evaluator node no longer has a Mains/HITL branch (unreachable without `task_inputs`); the
+    standalone Answer Evaluator keeps Mains evaluation.
+  - **Specialist response isolation (round 2 B1, AC17):** because specialists now store the student's question in
+    `messages`, `/agent/chat/stream` forwards only model output (`_is_input_message` filter). The client response,
+    the response cache and the saved assistant message contain only the specialist's answer.
+  - **Streaming is not token-by-token (recorded at close, pre-existing):** with `subgraphs=False` the nested
+    specialists' tokens are not emitted, so answers arrive as one completed response. Documented (README, `chat.py`
+    docstring) and kept in the backlog (MED); not changed in Phase 05.

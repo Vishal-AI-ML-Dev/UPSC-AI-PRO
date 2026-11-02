@@ -1,9 +1,12 @@
-"""Agent chat route - single entry point backed by the LangGraph supervisor.
+"""Mentor chat route - the only HTTP entry point to the LangGraph supervisor.
 
-Exposes the full multi-agent system (supervisor -> mentor / rag / planner /
-evaluator / current-affairs) behind one authenticated endpoint. Each request
+Each message gets one structured LLM routing call that picks one specialist
+(mentor tool agent / planner / evaluator / current affairs; see
+``src/graph/supervisor.py``); that specialist answers. It is a router over
+specialists, not parallel or multi-step multi-agent orchestration. Each request
 runs on a per-user thread so the checkpointer can persist conversation state and
-the long-term store can personalise responses.
+the long-term store can personalise responses; the route is recomputed for every
+message (Phase 05). HITL interrupts are not supported here (no resume path).
 
 The handler is intentionally a synchronous ``def``: the compiled graph uses a
 synchronous Postgres checkpointer, so it must be invoked with ``.invoke``.
@@ -85,7 +88,20 @@ def _learn_from_question(store, user_id: str, profile: dict, question: str) -> N
 # so internal routing/grading LLM calls never leak into the response stream.
 # "agent" is the canonical mentor tool-calling brain's answer node; its
 # tool-deciding turns carry no content, so only the final answer streams.
+# "generate" (the CRAG answer node) is no longer a supervisor route (Phase 05),
+# but it stays: tests/test_chat_isolation.py streams through a fake graph whose
+# answer node is named "generate". Harmless for the real graph.
 _FINAL_NODES = {"generate", "planner", "evaluator", "current_affairs", "agent"}
+
+
+def _is_input_message(chunk) -> bool:
+    """True for human / system / tool messages (and their chunk variants).
+
+    Duck-typed on ``.type`` ("human", "HumanMessageChunk", ...) so only model
+    output ("ai" / "AIMessageChunk") reaches the client stream.
+    """
+    kind = str(getattr(chunk, "type", "") or "").lower()
+    return kind.startswith(("human", "system", "tool"))
 
 
 def _chunk_text(content) -> str:
@@ -120,13 +136,17 @@ def agent_chat_stream(
     request: Request,
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
-    """Stream the supervisor graph's final answer token-by-token.
+    """Return the supervisor graph's answer as a streaming text response.
 
-    Runs the graph with ``stream_mode=["messages", "values"]`` so answer tokens
-    can be forwarded as they are generated, while the final state is retained as
-    a fallback for routes whose generation is not token-streamable. Token output
-    is filtered to the answer-producing nodes so internal routing and grading
-    LLM calls never leak into the user-facing stream.
+    A streaming endpoint does NOT mean the model output is shown token by token.
+    The graph runs with ``stream_mode=["messages", "values"]`` and the default
+    ``subgraphs=False``: messages from answer-producing nodes are forwarded as
+    they are emitted, and the final state is kept as a fallback. Today every
+    specialist is a nested subgraph, so its model tokens are not emitted at this
+    level: planner / evaluator / current-affairs answers arrive as one completed
+    message, and mentor answers arrive whole via the final-state fallback
+    (pre-existing; backlog). Only model output from answer nodes is forwarded, so
+    routing calls and stored student questions never reach the client.
 
     A cache hit streams the stored answer in small slices (still smooth for the
     client) without touching the graph.
@@ -183,7 +203,12 @@ def agent_chat_stream(
             ):
                 if mode == "messages":
                     chunk, metadata = data
-                    if metadata.get("langgraph_node") in _FINAL_NODES:
+                    # Forward model output only. Specialists store the student's
+                    # question as a HumanMessage (Phase 05), and the messages stream
+                    # emits it under the specialist's node name - never echo it.
+                    if metadata.get("langgraph_node") in _FINAL_NODES and not _is_input_message(
+                        chunk
+                    ):
                         text = _chunk_text(getattr(chunk, "content", ""))
                         if text:
                             streamed = True

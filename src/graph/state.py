@@ -1,7 +1,9 @@
-"""Shared state object for the UPSC agentic system.
+"""Shared state object for the Mentor chat graph.
 
-This ``TypedDict`` is the single state contract passed between every subgraph
-(mentor, NCERT, lecture, current affairs, ...) and the top-level supervisor.
+This ``TypedDict`` is the state contract shared by the Mentor chat supervisor
+(``src/graph/supervisor.py``) and its specialists (mentor tool agent, planner,
+evaluator, current affairs, optional plan-execute), and by the CRAG subgraph used
+by the eval harness. NCERT / PYQ / Lecture / Upload do not use it.
 ``total=False`` marks all keys optional, so each node only populates the
 fields it is responsible for and leaves the rest untouched.
 """
@@ -24,14 +26,12 @@ class AgentState(TypedDict, total=False):
     chat_history: Optional[list]  # [{"role": "user"|"assistant", "content": str}]
 
     # --- Routing (supervisor + per-agent routers) ---
-    route: str  # Specialist chosen by the supervisor.
+    route: str  # Router OUTPUT for the current message; never read as an input (Phase 05).
     intent: str  # "casual" | "vague" | "emotional" | "academic"
     needs_web_search: bool  # Whether live web context is required.
-    task_inputs: Optional[dict]  # Structured params for form-style agents
-    # (planner / evaluator / current affairs).
 
     # --- Retrieval (knowledge base / RAG) ---
-    persist_key: str  # Chroma collection key for the active RAG document.
+    persist_key: str  # Qdrant collection key for the CRAG subgraph (eval harness only).
     kb_context: str  # Retrieved, grounded context text.
     citations: list[str]  # Source labels for user-facing attribution.
     grounded: bool  # True when retrieval cleared the relevance threshold.

@@ -9,7 +9,7 @@ Designed and built end to end — FastAPI + LangGraph backend, React/TypeScript 
 > **Deployment status:** being redeployed on new infrastructure. Live demo and API docs links will be added here after deployment (`<live-demo-url>`, `<api-docs-url>`). See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).
 
 ![CI](https://img.shields.io/badge/CI-lint_%C2%B7_tests_%C2%B7_build_%C2%B7_LLM--eval-2088FF?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-930_offline-22C55E?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-1212_offline-22C55E?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT_(recommended)-blue?style=flat-square)
 
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white)
@@ -22,7 +22,7 @@ Designed and built end to end — FastAPI + LangGraph backend, React/TypeScript 
 
 </div>
 
-> **Reviewer TL;DR** — 8 product workflows: every feature page's route calls its feature functions directly (NCERT, PYQ, evaluator, current affairs, planner, lecture, PDF chat); the LLM-routed LangGraph supervisor (one structured routing call → mentor / planner / evaluator / current-affairs / rag) serves mentor chat only, with a ReAct tool-calling mentor; dense retrieval re-ranked by RRF over dense + lexical rankings, with optional (off-by-default) cross-encoder reranking and citations built from tool results; DB-persisted background-job status; circuit breakers, distributed rate limiting, request tracing; provider fallback (Gemini → Groq); 930 offline tests + an LLM-as-judge faithfulness gate in CI. Optional dependencies (cache, Redis, tracing, error monitoring) **fail open**, so the app degrades instead of crashing; Qdrant and the LLM providers are required.
+> **Reviewer TL;DR** — 8 product workflows: every feature page's route calls its feature functions directly (NCERT, PYQ, evaluator, current affairs, planner, lecture, PDF chat); the LLM-routed LangGraph supervisor (one structured routing call per message → mentor / planner / evaluator / current-affairs) serves mentor chat only, with a ReAct tool-calling mentor; dense retrieval re-ranked by RRF over dense + lexical rankings, with optional (off-by-default) cross-encoder reranking and citations built from tool results; DB-persisted background-job status; circuit breakers, distributed rate limiting, request tracing; provider fallback (Gemini → Groq); 1212 offline tests + an LLM-as-judge faithfulness gate in CI. Optional dependencies (cache, Redis, tracing, error monitoring) **fail open**, so the app degrades instead of crashing; Qdrant and the LLM providers are required.
 
 ---
 
@@ -91,7 +91,7 @@ flowchart TD
     D --> E[Agent Routing — supervisor + model router]
     E --> F[RAG Pipeline — retrieve · re-rank]
     F --> G[Grounding — source citations + relevance gate]
-    G --> H[Streaming Response — token by token]
+    G --> H[Streaming HTTP response — answer arrives when complete]
     H --> I[Conversation Persistence — Postgres]
 ```
 
@@ -122,17 +122,16 @@ flowchart LR
     S -->|planner| P[Planner]
     S -->|evaluator| E[Evaluator]
     S -->|current_affairs| C[Current Affairs]
-    S -->|rag| R[CRAG subgraph — needs persist_key; not reachable over HTTP]
     M -.tools.-> T[web_search / knowledge_base_search]
     S -.default when unsure.-> M
 ```
 
 NCERT, PYQ, Lecture and PDF chat do **not** go through the supervisor: their routes call plain feature functions in `src/agents/<feature>/graph.py` directly. The supervisor serves `POST /agent/chat/stream` (mentor chat) only. The only autonomous agent is the ReAct mentor.
 
-- **Supervisor pattern.** A single LLM call returns a **structured `RouteDecision`** (Pydantic `Literal` over 5 routes). All subgraphs share one `AgentState`; only the supervisor is compiled with the checkpointer/store, so nested agents inherit memory. Callers may force a route by pre-setting `state['route']` when the UI already knows the target.
+- **Supervisor pattern (a router, not multi-agent orchestration).** For **every message**, a single LLM call returns a **structured `RouteDecision`** (Pydantic `Literal` over 4 routes) and exactly one specialist answers. All subgraphs share one `AgentState`; only the supervisor is compiled with the checkpointer/store, so conversation history persists per thread. The saved route of an earlier message never decides the next one (there is no forced-route input).
 - **Agent routing.** Classify → dispatch to one specialist. Default to **mentor** when unsure (safe fallback). Complex mentor turns can escalate to a **plan-execute** graph (`is_complex`) when `PLAN_EXECUTE_ENABLED=true` (off by default).
 - **Tool calling.** A ReAct-style loop (`build_tool_agent`) gives the *model* real tools (`web_search`, `knowledge_base_search`) and decides when/how to call them. Tool dispatch is a **pure, offline-tested function** isolated from the LLM.
-- **Agent communication.** Via shared typed state — no ad-hoc message passing; structured params flow through `state['task_inputs']`, RAG adds `state['persist_key']`.
+- **Agent communication.** Via shared typed state — no ad-hoc message passing. Mentor chat sends only the message text; the planner / evaluator / current-affairs specialists parse their inputs from it deterministically and ask for anything missing. Document questions go to the mentor's knowledge-base tool; the CRAG subgraph (`src/graph/rag_graph.py`) runs only in the eval harness. Human-in-the-loop interrupts (`HITL_ENABLED`, off) are not supported by mentor chat (no resume path).
 - **Failure recovery & retries.** Tool loop capped at `DEFAULT_MAX_TOOL_LOOPS = 3` (no infinite tool spirals); KB is a *bonus not a gate* — if retrieval returns nothing, the agent still answers timeless questions and only refuses on time-sensitive facts; provider fallback (`with_fallbacks`) plus the provider SDKs' own `max_retries` wrap flaky LLM calls.
 
 ### Background Processing Design
@@ -257,7 +256,7 @@ flowchart LR
 
 **Problem:** multi-second LLM generations feel broken if the UI waits for the full answer.<br>
 **Alternatives:** block-and-return (poor UX), polling (complex).<br>
-**Decision:** `StreamingResponse` (token-by-token) for chat routes; `/sync` variants return Pydantic-validated structured output for programmatic use.<br>
+**Decision:** `StreamingResponse` for chat routes (a streaming endpoint is not the same as token-by-token display: Mentor chat answers currently arrive as one completed response because the specialists are nested subgraphs streamed with `subgraphs=False` — see backlog); `/sync` variants return Pydantic-validated structured output for programmatic use.<br>
 **Tradeoff:** streaming + strict output schemas don’t mix, hence two endpoint shapes to maintain.
 </details>
 
@@ -283,7 +282,7 @@ flowchart LR
 
 | Metric | Value | Reproduce |
 |---|---|---|
-| Automated tests | **930 tests / 64 modules**, fully offline (full run 2026-11-02) | `uv run pytest -q` |
+| Automated tests | **1212 tests / 76 modules**, fully offline (full run 2026-11-02, Phase 05) | `uv run pytest -q` |
 | Backend size | **15,455 LOC / 109 modules** | `find src -name '*.py' \| xargs wc -l` |
 | Frontend size | **6,243 LOC / 40 files** | `find frontend/src -name '*.ts*' \| xargs wc -l` |
 | Initial JS+CSS load | **244 KB raw ≈ 82 KB gzip** | `frontend/dist/assets/index-*` |
@@ -332,7 +331,7 @@ flowchart LR
 |---|---|
 | **System Design** | Layered architecture, deliberate middleware ordering, externalised vector/user/checkpoint state |
 | **Production AI Engineering** | Provider fallback, model routing (cost/quality), semantic cache, CI eval gate |
-| **Agentic AI** | LLM-routed supervisor over 5 routes, ReAct tool-calling mentor with a hard loop cap |
+| **Agentic AI** | LLM-routed supervisor over 4 routes (routed per message), ReAct tool-calling mentor with a hard loop cap |
 | **LangGraph** | Shared `AgentState`, checkpointer, nested subgraphs, opt-in plan-execute escalation |
 | **RAG Systems** | Dense retrieval, RRF re-ranking with a lexical signal, opt-in cross-encoder rerank, source citations |
 | **Distributed Systems** | Distributed rate limiting, circuit breakers, persisted job queue, fail-open deps |

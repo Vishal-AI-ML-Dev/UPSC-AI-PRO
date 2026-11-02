@@ -1,8 +1,8 @@
 """Mentor chat sub-routes get usable inputs from the free-text question (mocked).
 
 ``/agent/chat/stream`` only sends ``question``; the planner, evaluator and
-current-affairs subgraphs used to read everything from ``task_inputs`` (never
-set by chat), and the rag route needs a ``persist_key`` (never set by chat).
+current-affairs subgraphs parse their inputs from it (``task_inputs`` was never
+set by chat and was removed in Phase 05, as was the unreachable ``rag`` route).
 No provider, web or vector-store call is made.
 """
 
@@ -130,7 +130,6 @@ def stub_supervisor(monkeypatch):
         return lambda state: {"answer": name}
 
     monkeypatch.setattr(supervisor, "build_mentor_graph", lambda: node("mentor"))
-    monkeypatch.setattr(supervisor, "build_rag_subgraph", lambda label: node("rag"))
     monkeypatch.setattr(supervisor, "build_planner_subgraph", lambda: node("planner"))
     monkeypatch.setattr(supervisor, "build_evaluator_subgraph", lambda: node("evaluator"))
     monkeypatch.setattr(
@@ -139,14 +138,31 @@ def stub_supervisor(monkeypatch):
     return supervisor.build_supervisor()
 
 
-def test_rag_route_without_document_goes_to_mentor(stub_supervisor):
+# Phase 05 rewrote these two: the ``rag`` route and forced routes were removed
+# (ADR-014). Same intent - a document question in Mentor chat is answered by the
+# mentor - now with the router deciding instead of a pre-set ``route``.
+# Intentional overlap: the first one also passed on the pre-Phase-05 code (the old
+# rag -> mentor fallback) and duplicates
+# tests/test_supervisor_routing.py::test_route_in_the_input_does_not_bypass_the_router[rag].
+# It is kept (no existing test is deleted) as a guard on this module's historical case.
+def _router_says(monkeypatch, route):
+    class _Router:
+        def invoke(self, *a, **k):
+            return supervisor.RouteDecision(route=route)
+
+    monkeypatch.setattr(supervisor, "_structured_llm", lambda schema: _Router())
+
+
+def test_rag_route_without_document_goes_to_mentor(stub_supervisor, monkeypatch):
+    _router_says(monkeypatch, "mentor")
     out = stub_supervisor.invoke({"question": "explain NCERT class 6 chapter 11", "route": "rag"})
     assert out["answer"] == "mentor"
 
 
-def test_rag_route_with_document_stays_rag(stub_supervisor):
+def test_rag_route_with_document_is_answered_by_mentor(stub_supervisor, monkeypatch):
+    _router_says(monkeypatch, "mentor")
     out = stub_supervisor.invoke({"question": "q", "route": "rag", "persist_key": "ncert_x"})
-    assert out["answer"] == "rag"
+    assert out["answer"] == "mentor"
 
 
 # ----------------------------- end to end (chat endpoint) ------------------- #

@@ -195,9 +195,7 @@ def knowledge_base_tool_fn(query: str, persist_key: str = "") -> str:
         try:
             kb = mentor_kb.search_kb(query, k=4)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "knowledge_base_search (mentor KB) unavailable: %s", _describe(exc)
-            )
+            logger.warning("knowledge_base_search (mentor KB) unavailable: %s", _describe(exc))
             return KB_UNAVAILABLE_NOTE
         context = kb.get("context")
         if not context:
@@ -389,13 +387,17 @@ def bound_history(messages, max_turns: int) -> list:
       intact, including its tool calls and tool results.
     * At most ``max_turns`` earlier turns are kept (newest first); older turns
       are dropped whole. A turn starts at a human message.
-    * Earlier turns are reduced to the human message and that turn's LAST AI
-      message without tool calls (its final answer). Other supervisor routes
-      append answers without a human message, so they land inside an earlier
-      turn; keeping only the last one stops them bypassing the bound. Tool
-      calls and tool results of earlier turns are always dropped, so a provider
-      never sees a tool result without its call. An unanswered earlier question
-      is kept on its own and counts as a turn.
+    * Earlier turns are reduced to the human message and that turn's FIRST AI
+      message without tool calls (its own final answer), so every question stays
+      paired with its reply. Since Phase 05 the mentor and the planner /
+      evaluator / current-affairs specialists record the question before their
+      answer, so each of their turns has one answer. The optional plan_execute
+      route (off by default) and checkpoints written earlier can leave answers
+      without their question after a turn's answer; those orphans are dropped (Phase 03 kept the last answer,
+      which paired a question with another route's reply), and they can never
+      bypass the bound. Tool calls and tool results of earlier turns are always
+      dropped, so a provider never sees a tool result without its call. An
+      unanswered earlier question is kept on its own and counts as a turn.
     * Messages before the first human message are dropped, so the result
       starts with a human message whenever one exists.
 
@@ -417,7 +419,7 @@ def bound_history(messages, max_turns: int) -> list:
             if _message_type(m) == "ai" and not getattr(m, "tool_calls", None)
         ]
         if answers:
-            out.append(answers[-1])
+            out.append(answers[0])
     out.extend(msgs[starts[-1] :])
     return out
 

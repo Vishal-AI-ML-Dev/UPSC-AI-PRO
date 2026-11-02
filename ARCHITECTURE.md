@@ -2,8 +2,8 @@
 
 A RAG backend for UPSC exam preparation, built on FastAPI + LangGraph. Mentor
 chat (`POST /agent/chat/stream`) goes through a LangGraph supervisor: one
-structured LLM routing call to one of 5 routes (mentor, planner, evaluator,
-current_affairs, rag). The mentor route is a ReAct tool-calling agent — the
+structured LLM routing call per message to one of 4 routes (mentor, planner,
+evaluator, current_affairs). The mentor route is a ReAct tool-calling agent — the
 only autonomous agent. The other features (NCERT, PYQ, lecture, PDF chat, and
 the planner/evaluator/current-affairs pages) call plain feature functions in
 `src/agents/<feature>/graph.py` directly from their routes. Retrieval is dense
@@ -62,14 +62,16 @@ router — dead code.)
   loading current-affairs sources into the vector store.
 
 ### `src/graph/` — orchestration
-- `supervisor.py` — one structured LLM routing call to one of 5 routes
-  (mentor chat only). Optional plan-execute escalation (`plan_execute.py`) is
-  off by default (`PLAN_EXECUTE_ENABLED`).
+- `supervisor.py` — one structured LLM routing call per message to one of 4
+  routes (mentor chat only). A route saved in the checkpoint never decides the
+  next message (Phase 05, ADR-014). Optional plan-execute escalation
+  (`plan_execute.py`) is off by default (`PLAN_EXECUTE_ENABLED`).
 - `app_graph.py` — top-level assembled graph.
 - `agent_subgraphs.py` — wraps the planner/evaluator/current-affairs feature
-  functions as supervisor subgraphs.
-- `rag_graph.py` — corrective-RAG pipeline. Needs a `persist_key`, which no
-  HTTP route sets, so it only runs in `src/eval/llm_eval.py`.
+  functions as supervisor subgraphs; inputs are parsed from the chat message.
+  HITL (`HITL_ENABLED`, off) is not supported by mentor chat (no resume path).
+- `rag_graph.py` — corrective-RAG pipeline. Not a supervisor route (removed in
+  Phase 05); it only runs in `src/eval/llm_eval.py`.
 - `tools.py` — tool-calling agent (per-tier model resolution, tool loop,
   route description).
 - `mentor_graph.py`, `memory.py`, `profile.py`, `state.py` — mentor graph,
