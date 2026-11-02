@@ -9,23 +9,27 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | 00 | Engineering workspace setup | DONE (2026-11-02) — `docs/phase-reports/phase-00-report.md` |
 | 01 | Baseline & safety net | DONE (2026-11-02) — `docs/phase-reports/phase-01-report.md` |
 | 02 | Security & ownership | DONE (2026-11-02) — `docs/phase-reports/phase-02-report.md` |
-| 03 | Request-path performance | **NEXT** — spec STUB `.claude/specs/phase-03-request-path-performance.md` |
-| 04–09 | See `.claude/specs/README.md` | STUB |
+| 03 | Request-path performance | DONE (2026-11-02; not committed) — `docs/phase-reports/phase-03-report.md` |
+| 04 | Durable jobs | **NEXT** — spec STUB `.claude/specs/phase-04-durable-jobs.md` (do not start without the user) |
+| 05–09 | See `.claude/specs/README.md` | STUB |
 
 ## The 8 workflows (must not regress)
 | Workflow | Backend entry | Frontend | Status (last verified) |
 |---|---|---|---|
-| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02 |
-| NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 |
-| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02 |
-| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02 |
-| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 |
-| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke PASS 2026-11-02 |
-| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02 |
-| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02 |
+| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close) |
+| NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed) |
+| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02; parse/bank status/clear off the event loop, bank `sync=true` offloaded (Phase 03) (Phase 03 close) |
+| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02; `*/sync` endpoints off the event loop (Phase 03) (Phase 03 close) |
+| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed) |
+| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke PASS 2026-11-02; `generate/sync` off the event loop (Phase 03) (Phase 03 close) |
+| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02; `process`/`process-text` off the event loop (Phase 03) (Phase 03 close) |
+| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02; upload `sync=true` offloaded (Phase 03) (Phase 03 close) |
 
-Test suite status (2026-11-02, Phase 02 close): `1086 passed, 13 warnings in 146.43s` (Phase 01 close: `930 passed`).
-Ruff: `All checks passed!`. compileall exit 0. Frontend `npm run build` ✓ and `npm run lint` clean.
+Test suite status (2026-11-02, Phase 03 close): `1113 passed, 13 warnings in 112.29s (0:01:52)` (Phase 02 close: `1086 passed`;
+Phase 01 close: `930 passed`).
+Engineering metrics (synthetic request-path benchmark, how to rerun, UNVERIFIED production metrics):
+`docs/ENGINEERING_METRICS.md`; harness `scripts/bench_request_path.py` + `scripts/bench_server.py`.
+Ruff: `All checks passed!`. compileall exit 0. Frontend unchanged in Phase 03 (last build/lint clean at Phase 02 close).
 Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 
 ## Verified architecture facts
@@ -48,10 +52,10 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 | # | Risk | Sev | Planned phase |
 |---|---|---|---|
 | 1 | ~~No ownership at vector boundary; LLM-chosen `persist_key`; global upload collections~~ CLOSED Phase 02 (ADR-007); legacy collections remain (cleanup backlog) | HIGH | 02 ✓ |
-| 2 | Blocking work in `async def` handlers (single worker) | HIGH | 03 |
+| 2 | Blocking work in `async def` handlers (single worker) → CLOSED Phase 03 (ADR-011: 18 handlers → `def`, upload sync branches + Upstash check offloaded, allow-list test). Threadpool (40) capacity risk accepted (Q2, backlog MED) | HIGH | 03 ✓ |
 | 3 | Non-durable jobs; boot reaper fails sibling workers' jobs | HIGH/MED | 04 |
 | 4 | Vector stack fails without Qdrant (Chroma not installed) | HIGH (misconfig) | 06 |
-| 5 | Unbounded inputs → CLOSED Phase 02 (field + 1 MiB body limits, ADR-009); checkpoint history growth still open | MED | 03 |
+| 5 | Unbounded inputs → CLOSED Phase 02 (field + 1 MiB body limits, ADR-009); checkpoint history growth: mentor *prompt* bounded in Phase 03 (6 earlier turns); stored checkpoint still grows | MED | 03 (prompt ✓) / later (storage) |
 | 6 | Auth rate limit → CLOSED Phase 02 (ADR-010, refresh excluded); account enumeration (register message, no dummy bcrypt) still open | MED | backlog |
 | 7 | Tokens in `localStorage` | MED | backlog |
 | 8 | ~~Upload size check relies on Content-Length; unbounded `_processed_cache`~~ CLOSED Phase 02 (byte-counted limits, bounded thread-safe per-user cache); upload memory ~2×50 MB/request open | MED | 03/04 |
@@ -112,24 +116,39 @@ All items below were corrected in place; claim → evidence table in `docs/phase
   copy (nested `book_info` shared); f-string/filename/topic log lines remain (`src/agents/lecture/graph.py` "chat index
   ready", topic logs; `src/agents/pyq/graph.py` filename log); `TypeError` text still returned to the model
   (`src/graph/tools.py`); `UPLOAD_ENDPOINTS` hard-codes `/api/v1`; auth limiter is per worker without Redis — LOW.
+- (Phase 03, Q2) AnyIO's default threadpool (40 tokens) is shared by every `def` handler, sync dependencies
+  (`get_current_user`, `get_db`) and `guard_stream`'s `next()` calls; Phase 03 moved more long LLM calls into it, so under
+  load auth/DB requests can queue behind them. Default kept by decision; revisit with Phase 04 jobs — MED.
+- (Phase 03) `SaveMessageRequest` (`src/api/routes/history.py`) and `FeedbackRequest` (`src/api/routes/feedback.py`) have no
+  `Field(max_length=...)`; bounded only by the 1 MiB body limit (feedback truncates on write) — LOW.
+- (Phase 03 NITs, `docs/phase-reports/phase-03-report.md` → Remaining NITs) `src/api/rate_limit.py` `_check`: no deadline on
+  waiting for the 8-slot Upstash budget; `uses_redis()` true while the Upstash breaker is OPEN (extra thread hop);
+  `RateLimiter.check` resolves the client twice; `anyio` imported directly (transitive dep, pinned 4.13.0); test-only
+  items (shared `make_pdf`, AST walker limits, fixed-delay sampling, timeout message) — LOW.
+- (Phase 03) Pre-existing ruff I001 (unsorted imports) in `scripts/ingest_mentor_kb.py`, `scripts/ingest_topper_md.py`;
+  CI lints only `src tests`, so not caught — LOW.
+- (Phase 03) Benchmark showed the emoji startup logs raise `UnicodeEncodeError` tracebacks on a cp1252 console on
+  every log call (see existing emoji backlog item) — confirms that item; LOW.
 
 ### Last handoff — 2026-11-02
-- Active phase: 03 Request-path performance — NEXT, not started (spec STUB, plan none). Phase 02 Security & ownership —
-  DONE (spec DONE, plan DONE), committed as `c68f6a3 security: enforce document ownership and abuse limits` (not pushed).
-- Done this session: Phase 02 end to end — spec + plan (`.claude/specs/phase-02-security-ownership.md`,
-  `.claude/plans/phase-02-security-ownership.md`, 4 revisions + review amendment); deployment check; test-first security
-  tests (8 new `tests/test_*` files + AC4 tests in `tests/test_tools.py`); R1–R15 incl. fail-closed MCP (R12-FC) across
-  `src/` (new `src/core/errors.py`), frontend history trimming, `.env.example` placeholder; two review rounds + fixes;
-  ADR-007..010 (`docs/DECISIONS.md`); report `docs/phase-reports/phase-02-report.md`; commit `c68f6a3`.
-  Post-phase documentation cleanup (completed, not yet committed): `CLAUDE.md` known-facts line and
-  `.claude/rules/security.md` vector-store rule now describe the Phase 02 ownership controls; resolved doc-drift backlog
-  item removed from this file.
-- Verified: `uv run pytest -q` → `1086 passed, 13 warnings in 146.43s (0:02:26)`; `uv run ruff check src tests` →
-  `All checks passed!`; compileall exit 0; `npm run build` → `✓ built in 3.73s`; `npm run lint` → `All matched files use
-  Prettier code style!`; security + code-quality re-review: 0 BLOCKING / 0 SHOULD-FIX; `git diff --check` clean for the
-  documentation cleanup.
-  Not verified: live Render dashboard settings (Q5) — UNVERIFIED; Render proxy peer vs `FORWARDED_ALLOW_IPS` — UNVERIFIED;
-  live workflow smoke (`docs/SMOKE_CHECKLIST.md`) — UNVERIFIED; push to remote — not done.
-- In progress / next step: commit the documentation cleanup (on request), then `/start-phase 3`.
-- Open questions for the user: Q5 (optional — R12-FC in place).
-- Uncommitted changes: `M CLAUDE.md`, `M .claude/rules/security.md`, `M docs/PROJECT_STATE.md` (documentation only).
+- Active phase: none in progress. Phase 03 Request-path performance — DONE (spec DONE, plan DONE incl. Amendments 1–2;
+  report `docs/phase-reports/phase-03-report.md`; ADR-011, ADR-012). Next: Phase 04 Durable jobs — spec STUB, plan none;
+  not started (wait for the user).
+- Done this session: Phase 03 end to end. 18 handlers `async def` → `def` (`src/api/routes/{auth,evaluator,experiments,
+  feedback,history,jobs,lecture,planner,progress,pyq}.py`); upload/PYQ-bank `sync=true` offloaded (`upload.py`, `pyq.py`);
+  Upstash check on a dedicated `anyio.CapacityLimiter(8)` (`src/api/rate_limit.py`); lock + `uses_redis()`
+  (`src/api/rate_limit_core.py`); `bound_history` (`src/graph/tools.py`) + `mentor_history_max_turns=6`
+  (`src/core/config.py`); tests `tests/test_async_routes.py` (13), `tests/test_mentor_history_bound.py` (14); benchmark
+  harness `scripts/bench_request_path.py`, `scripts/bench_server.py`; canonical `docs/ENGINEERING_METRICS.md`; five
+  review rounds; ADR-011/012 in `docs/DECISIONS.md`. Removed the four leftover benchmark temp dirs outside the repo
+  (`%TEMP%\upsc_bench_run_{27f861o5,9efaz048,d2jwapfb,u57nfjq0}`), each inspected first and deleted by exact path.
+- Verified: `uv run pytest -q` → `1113 passed, 13 warnings in 112.29s (0:01:52)`; `uv run ruff check src tests` →
+  `All checks passed!`; compileall exit 0; focused tests 5× `63 passed`; `git diff --check` exit 0; benchmark reproducibility
+  run (documented command) 8 rows, 0 errors; reviews 0 BLOCKING / 0 SHOULD-FIX.
+  Not verified: live smoke; Render latency, real LLM latency, production throughput; production Upstash/Render config;
+  root cause of one one-off test hang (helper fixed; not reproduced since).
+- In progress / next step: user reviews and (if wanted) commits Phase 03; then `/start-phase 4` when the user asks.
+- Open questions for the user: none.
+- Uncommitted changes: 17 modified (`src/` 15 files, spec, `docs/PROJECT_STATE.md`) + `docs/DECISIONS.md`,
+  `.claude/specs/README.md`; 7 untracked (plan, report, `docs/ENGINEERING_METRICS.md`, 2 scripts, 2 test files).
+  Nothing committed or pushed.

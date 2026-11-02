@@ -45,7 +45,7 @@ def _lecture_payload(result, fallback_video_id=None):
 
 
 @router.post("/process")
-async def process(
+def process(
     request: LectureRequest,
     background_tasks: BackgroundTasks,
     sync: bool = False,
@@ -90,7 +90,7 @@ async def process(
 
 
 @router.post("/process-text")
-async def process_text(
+def process_text(
     request: LectureTextRequest,
     background_tasks: BackgroundTasks,
     sync: bool = False,

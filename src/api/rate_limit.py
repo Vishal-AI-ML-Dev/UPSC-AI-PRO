@@ -22,16 +22,32 @@ so a client cannot pick its own rate-limit bucket by forging a header.
 Backend: an Upstash-Redis fixed-window counter (correct across >1 worker /
 instance) when creds are configured and ``rate_limit_redis_enabled`` is on;
 otherwise an in-process sliding window. A Redis outage trips a circuit breaker
-and the limiter transparently falls back to in-memory -- it never adds latency
-or blocks the request path.
+and the limiter transparently falls back to in-memory.
+
+Threading (Phase 03, ADR-011): the Upstash client is a synchronous HTTP call, so
+when Upstash is configured the whole check - including any in-memory fallback
+after an Upstash failure - runs on worker threads from ONE dedicated
+``CapacityLimiter`` of ``UPSTASH_CHECK_THREADS`` (8), shared by all requests. It
+never runs on the event loop and never takes slots from the default threadpool
+used by ``def`` handlers. When Upstash is not configured the in-memory check
+runs inline on the loop (it is cheap and non-blocking). The in-memory window is
+lock-protected, so concurrent checks cannot over-admit.
 """
 
+import anyio
+import anyio.to_thread
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.api.rate_limit_core import RateLimiter
+from src.api.rate_limit_core import Decision, RateLimiter
 from src.core.config import settings
+
+# Dedicated worker budget for blocking Upstash checks: created once per process
+# and shared by every request, so a slow Upstash can hold at most this many
+# threads and never starves the default threadpool.
+UPSTASH_CHECK_THREADS = 8
+_UPSTASH_THREADS = anyio.CapacityLimiter(UPSTASH_CHECK_THREADS)
 
 # Requests exempt from rate limiting (health checks, docs).
 _EXEMPT_PATHS = {"/", "/health", "/docs", "/redoc", "/openapi.json"}
@@ -89,15 +105,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Only the (proxy-header-resolved) peer address - never a request header.
         client_ip = request.client.host if request.client else "unknown"
-        allowed, retry_after = self._limiter.check(client_ip)
+        allowed, retry_after = await _check(self._limiter, client_ip)
         if not allowed:
             return _too_many(self.max_requests, self.period, retry_after)
 
         if request.method == "POST" and request.url.path in AUTH_LIMITED_PATHS:
-            allowed, retry_after = self._auth_limiter.check(f"auth:{client_ip}")
+            allowed, retry_after = await _check(self._auth_limiter, f"auth:{client_ip}")
             if not allowed:
                 return _too_many(self.auth_max_requests, self.auth_period, retry_after)
         return await call_next(request)
+
+
+async def _check(limiter: RateLimiter, key: str) -> Decision:
+    """Run ``limiter.check`` without blocking the event loop.
+
+    The Upstash path is a synchronous HTTP round-trip (up to the REST timeout),
+    so it runs on the dedicated ``_UPSTASH_THREADS`` budget; the in-memory path
+    is cheap and stays inline.
+    """
+    if limiter.uses_redis():
+        return await anyio.to_thread.run_sync(limiter.check, key, limiter=_UPSTASH_THREADS)
+    return limiter.check(key)
 
 
 class _Disabled:

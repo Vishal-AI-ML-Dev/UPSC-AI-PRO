@@ -9,7 +9,7 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
 
 @router.get("/{job_id}")
-async def job_status(job_id: str, current_user: dict = Depends(get_current_user)):
+def job_status(job_id: str, current_user: dict = Depends(get_current_user)):
     """Return status/result for a background job owned by the current user."""
     job = get_job(job_id, user_id=current_user.get("id"))
     if job is None:

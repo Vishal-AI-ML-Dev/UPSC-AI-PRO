@@ -12,7 +12,7 @@ router = APIRouter(prefix="/evaluator", tags=["Evaluator"])
 
 
 @router.post("/evaluate/sync")
-async def evaluate_sync(request: EvaluateRequest):
+def evaluate_sync(request: EvaluateRequest):
     """Basic answer evaluation (non-streaming)."""
     response = ""
     for chunk in evaluate_answer(request.question, request.answer):
@@ -24,7 +24,7 @@ async def evaluate_sync(request: EvaluateRequest):
 
 
 @router.post("/mains/sync")
-async def mains_eval_sync(request: MainsEvalRequest):
+def mains_eval_sync(request: MainsEvalRequest):
     """Mains answer evaluation (non-streaming)."""
     response = ""
     for chunk in evaluate_mains(
@@ -42,7 +42,7 @@ async def mains_eval_sync(request: MainsEvalRequest):
 
 
 @router.post("/model-answer/sync")
-async def model_answer_sync(request: ModelAnswerRequest):
+def model_answer_sync(request: ModelAnswerRequest):
     """Generate model answer (non-streaming)."""
     response = ""
     for chunk in get_model_answer(

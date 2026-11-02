@@ -31,7 +31,7 @@ async def generate(request: PlannerRequest, user: dict = Depends(get_current_use
 
 
 @router.post("/generate/sync", response_model=PlannerResponse)
-async def generate_sync(request: PlannerRequest):
+def generate_sync(request: PlannerRequest):
     """Generate study plan (non-streaming)."""
     response = ""
     for chunk in generate_plan(

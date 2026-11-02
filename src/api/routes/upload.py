@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from src.agents.upload.graph import ask_upload, process_upload
 from src.api.deps import get_current_user
@@ -49,7 +50,7 @@ async def upload_pdf(
 
     if sync:
         try:
-            return _work()
+            return await run_in_threadpool(_work)  # keep the event loop free
         except UserFacingError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
         except Exception as e:  # noqa: BLE001 - never echo internal error text

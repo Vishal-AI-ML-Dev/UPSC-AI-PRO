@@ -35,7 +35,7 @@ async def experiments_access(user: dict = Depends(get_current_user)):
 
 
 @router.get("/overview")
-async def experiments_overview(
+def experiments_overview(
     user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

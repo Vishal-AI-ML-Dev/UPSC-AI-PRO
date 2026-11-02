@@ -256,7 +256,7 @@ class ResetPasswordRequest(BaseModel):
 
 
 @router.post("/forgot-password")
-async def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Email a password-reset link if the address is registered.
 
     Always returns a generic message so we don't reveal whether an email exists.
@@ -336,7 +336,7 @@ def verify_email(body: VerifyEmailRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/resend-verification")
-async def resend_verification(body: ResendVerificationRequest, db: Session = Depends(get_db)):
+def resend_verification(body: ResendVerificationRequest, db: Session = Depends(get_db)):
     """Resend the verification email if the account exists and is still unverified.
 
     Always returns a generic message so we don't reveal whether an email exists.

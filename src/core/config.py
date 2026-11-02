@@ -311,6 +311,11 @@ class Settings(BaseSettings):
     plan_execute_parallel: bool = False
     plan_execute_max_concurrency: int = 3  # cap simultaneous sub-step LLM calls
 
+    # Mentor prompt window (Phase 03, ADR-011). The checkpointed thread keeps
+    # every message; each model call only gets this many EARLIER turns
+    # (question + final answer) plus the whole current turn. 0 = current turn only.
+    mentor_history_max_turns: int = 6
+
     # ------------------------------------------------------------------ #
     # Advanced retrieval upgrades (RAG audit #1-#3). All OFF by default and
     # FAIL-OPEN, so the current RRF hybrid behaviour is unchanged until each

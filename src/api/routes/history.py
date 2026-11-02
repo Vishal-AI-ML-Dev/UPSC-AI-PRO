@@ -39,7 +39,7 @@ def _msg_dict(m) -> dict:
 
 
 @router.get("/conversations")
-async def list_conversations(
+def list_conversations(
     agent: str | None = None,
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -50,7 +50,7 @@ async def list_conversations(
 
 
 @router.get("/conversations/{conversation_id}/messages")
-async def get_messages(
+def get_messages(
     conversation_id: str,
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -63,7 +63,7 @@ async def get_messages(
 
 
 @router.post("/messages", status_code=status.HTTP_201_CREATED)
-async def save_message(
+def save_message(
     body: SaveMessageRequest,
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),

@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from src.agents.pyq.graph import (
     build_question_bank,
@@ -54,7 +55,7 @@ async def generate(request: QuestionGenRequest, user: dict = Depends(get_current
 
 
 @router.post("/parse", response_model=ParseResponse)
-async def parse(request: ParseRequest):
+def parse(request: ParseRequest):
     """Parse pasted question text."""
     questions = parse_questions(request.text)
     return {"questions": questions}
@@ -91,7 +92,7 @@ async def bank_upload(
 
     if sync:
         try:
-            return _work()
+            return await run_in_threadpool(_work)  # keep the event loop free
         except UserFacingError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
         except Exception as e:  # noqa: BLE001 - never echo internal error text
@@ -124,12 +125,12 @@ async def bank_generate(
 
 
 @router.get("/bank/status", response_model=BankStatusResponse)
-async def bank_status(current_user: dict = Depends(get_current_user)):
+def bank_status(current_user: dict = Depends(get_current_user)):
     """Whether the user has a personal PYQ bank yet."""
     return get_bank_status(current_user["id"])
 
 
 @router.post("/bank/clear")
-async def bank_clear(current_user: dict = Depends(get_current_user)):
+def bank_clear(current_user: dict = Depends(get_current_user)):
     """Delete the user's personal PYQ bank."""
     return clear_bank(current_user["id"])

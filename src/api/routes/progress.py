@@ -103,7 +103,7 @@ def _streak(active_days: set[str], today: date) -> tuple[int, int, bool]:
 
 
 @router.get("/overview")
-async def progress_overview(
+def progress_overview(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

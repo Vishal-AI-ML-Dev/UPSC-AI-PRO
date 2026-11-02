@@ -8,6 +8,7 @@ unset, breaker OPEN, or a transient error). No app-settings import here.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import defaultdict, deque
 from typing import Optional, Tuple
@@ -19,23 +20,30 @@ Decision = Tuple[bool, int]
 
 
 class _InMemoryLimiter:
-    """Per-key sliding window using a deque of timestamps. Single process."""
+    """Per-key sliding window using a deque of timestamps. Single process.
+
+    Thread-safe: when Upstash is configured the check runs on worker threads, and
+    on an Upstash failure several of them fall back here at once. One lock covers
+    prune + check + append so concurrent requests can never over-admit.
+    """
 
     def __init__(self, max_requests: int, period: int) -> None:
         self.max_requests = max_requests
         self.period = period
         self._hits: dict[str, deque] = defaultdict(deque)
+        self._lock = threading.Lock()
 
     def hit(self, key: str, now: float) -> Decision:
-        dq = self._hits[key]
-        window_start = now - self.period
-        while dq and dq[0] < window_start:
-            dq.popleft()
-        if len(dq) >= self.max_requests:
-            retry_after = int(self.period - (now - dq[0])) + 1
-            return (False, retry_after)
-        dq.append(now)
-        return (True, 0)
+        with self._lock:
+            dq = self._hits[key]
+            window_start = now - self.period
+            while dq and dq[0] < window_start:
+                dq.popleft()
+            if len(dq) >= self.max_requests:
+                retry_after = int(self.period - (now - dq[0])) + 1
+                return (False, retry_after)
+            dq.append(now)
+            return (True, 0)
 
 
 class RateLimiter:
@@ -50,11 +58,16 @@ class RateLimiter:
     def _get_redis(self):
         return self._redis if self._redis is not None else get_upstash()
 
+    def uses_redis(self) -> bool:
+        """True when ``check`` will try Upstash (a blocking HTTP call) first."""
+        redis = self._get_redis()
+        return redis is not None and bool(getattr(redis, "enabled", False))
+
     def check(
         self, key: str, *, mono: Optional[float] = None, wall: Optional[float] = None
     ) -> Decision:
-        redis = self._get_redis()
-        if redis is not None and getattr(redis, "enabled", False):
+        if self.uses_redis():
+            redis = self._get_redis()
             decision = self._check_redis(redis, key, wall if wall is not None else time.time())
             if decision is not None:
                 return decision

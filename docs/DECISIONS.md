@@ -90,3 +90,44 @@ Append new ADRs; never rewrite accepted ones — supersede them.
   rotating and revocable, so they cannot be guessed.
 - **Consequences:** Refresh abuse is bounded by the global limiter (100/60 s per IP by default). Credential guessing
   and email-sending endpoints keep the strict budget.
+
+## ADR-011 — No blocking work on the event loop; the mentor prompt is a bounded window
+2026-11-02 · Accepted (Phase 03; Q1 yes, Q2 no, Q3/Q4 and the S1 review decision approved by the user)
+- **Context:** One uvicorn worker served every request from one event loop. 18 `async def` handlers ran sync work on
+  it: LLM calls, SQLAlchemy, Qdrant, SMTP, live web search. So did the two upload `sync=true` branches and the Upstash
+  rate-limit check, which runs on every request. One slow call stalled every user, `/health` included. The AI Mentor
+  also sent its whole checkpointed thread, including old tool output, to the model on every turn.
+- **Decision:**
+  - Route handlers that do sync work are plain `def` and run in FastAPI's threadpool. `async def` is allowed only for
+    handlers on the allow-list in `tests/test_async_routes.py`: pure handlers, builders of streaming generators, or
+    handlers that `await` and offload sync work with `run_in_threadpool`. CI fails on any other `async def` route.
+  - Upstash rate-limit checks run on one dedicated, process-wide `anyio.CapacityLimiter(8)`, never on the default
+    pool. `anyio` is imported directly; it is a starlette/httpx transitive dependency pinned in `uv.lock`, and
+    `pyproject.toml` is unchanged. Declare it if starlette ever drops it.
+  - The in-memory rate-limit window is lock-protected. `RateLimiter.uses_redis()` is public.
+  - The mentor sends the whole current turn plus up to `mentor_history_max_turns` (default 6) earlier turns. Each
+    earlier turn is reduced to its question and its last answer. Unanswered earlier questions are kept and count as
+    turns. Earlier tool calls and results are never sent. The stored checkpoint is not pruned.
+- **Consequences:**
+  - The event loop stays responsive under blocking work (synthetic evidence in `docs/ENGINEERING_METRICS.md`).
+  - More work shares AnyIO's default 40-thread pool. That risk was accepted (Q2) and is to be revisited in Phase 04.
+  - A slow Upstash caps limiter throughput at about 8 ÷ RTT instead of stalling the process.
+  - Mentor context older than 6 turns is not visible to the model.
+  - Checkpoint storage growth remains open.
+
+## ADR-012 — Synthetic request-path benchmark harness; one canonical metrics page
+2026-11-02 · Accepted (Phase 03 plan Amendment 2, requested by the user)
+- **Context:** Phase 03 claims about responsiveness needed reproducible evidence. No metrics document existed. The
+  live dependencies (Render, Gemini/Groq, Upstash) cannot be measured from a dev machine without credentials.
+- **Decision:**
+  - `scripts/bench_request_path.py` and `scripts/bench_server.py` benchmark the real app on one local uvicorn worker.
+    They use a synthetic LLM and a synthetic Upstash, run before/after via `git archive`, and print JSON plus a
+    summary table.
+  - The server runs offline. It never reads `.env`, drops every non-allow-listed environment variable, blanks all
+    service settings, and binds to `127.0.0.1` only.
+  - `docs/ENGINEERING_METRICS.md` is the canonical page for metric definitions, how to run them, recorded results and
+    the list of UNVERIFIED metrics. Phase reports keep the raw measurements.
+- **Consequences:**
+  - Numbers are labelled SYNTHETIC, local and single-worker, and must not be cited as production performance.
+  - Render latency, real LLM latency and production throughput stay UNVERIFIED until measured.
+  - Absolute values vary with machine state; only before/after direction is robust.

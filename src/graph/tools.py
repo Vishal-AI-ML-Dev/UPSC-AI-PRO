@@ -382,6 +382,46 @@ def _should_seed_question(history: list, question) -> bool:
     return True
 
 
+def bound_history(messages, max_turns: int) -> list:
+    """The slice of a checkpointed thread that is sent to the model.
+
+    * The current turn (latest human message and everything after it) is kept
+      intact, including its tool calls and tool results.
+    * At most ``max_turns`` earlier turns are kept (newest first); older turns
+      are dropped whole. A turn starts at a human message.
+    * Earlier turns are reduced to the human message and that turn's LAST AI
+      message without tool calls (its final answer). Other supervisor routes
+      append answers without a human message, so they land inside an earlier
+      turn; keeping only the last one stops them bypassing the bound. Tool
+      calls and tool results of earlier turns are always dropped, so a provider
+      never sees a tool result without its call. An unanswered earlier question
+      is kept on its own and counts as a turn.
+    * Messages before the first human message are dropped, so the result
+      starts with a human message whenever one exists.
+
+    Without any human message the list is returned unchanged (as a copy).
+    The checkpoint itself is never modified.
+    """
+    msgs = list(messages or [])
+    starts = [i for i, m in enumerate(msgs) if _message_type(m) == "human"]
+    if not starts:
+        return msgs
+    keep = max(0, int(max_turns))
+    earlier = list(zip(starts, starts[1:]))[-keep:] if keep else []
+    out: list = []
+    for begin, end in earlier:
+        out.append(msgs[begin])
+        answers = [
+            m
+            for m in msgs[begin + 1 : end]
+            if _message_type(m) == "ai" and not getattr(m, "tool_calls", None)
+        ]
+        if answers:
+            out.append(answers[-1])
+    out.extend(msgs[starts[-1] :])
+    return out
+
+
 def current_turn(messages) -> list:
     """Messages belonging to the current user question.
 
@@ -554,6 +594,8 @@ def build_tool_agent(
         return _models[tier]
 
     def agent_node(state) -> dict:
+        from src.core.config import settings
+
         question = state.get("question")
         # Route by query complexity: trivial turns -> lite (fast/cheap), reasoning
         # or volatile-lookup turns -> strong. Tools are exposed here, so
@@ -584,7 +626,10 @@ def build_tool_agent(
                 sys_text = _compose_system(sys_text, extra_context(state))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("extra_context failed: %s", exc)
-        resp = active.invoke([SystemMessage(content=sys_text), *history])
+        # Only a bounded window of the thread reaches the model (Phase 03);
+        # budget, seeding and citations above/below use the full history.
+        window = bound_history(history, settings.mentor_history_max_turns)
+        resp = active.invoke([SystemMessage(content=sys_text), *window])
         new_messages.append(resp)
         out: dict = {"messages": new_messages}
         if not getattr(resp, "tool_calls", None):

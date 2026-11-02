@@ -25,7 +25,7 @@ class FeedbackRequest(BaseModel):
 
 
 @router.post("/submit", status_code=status.HTTP_201_CREATED)
-async def submit_feedback(
+def submit_feedback(
     body: FeedbackRequest,
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
