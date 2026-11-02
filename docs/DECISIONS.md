@@ -39,3 +39,15 @@ Append new ADRs; never rewrite accepted ones — supersede them.
   edited file (ruff / prettier if already installed). `lint_changed.py` reports ruff findings without blocking.
 - **Consequences:** Legacy files may get reformatted the first time they are edited; keep such diffs in the same
   phase and mention them in the phase report.
+
+## ADR-006 — Keep known dead code until the operations phase
+2026-11-02 · Accepted
+- **Context:** Phase 01 confirmed three dead/stray files: `src/api/routes/mentor.py` (router not registered in
+  `src/api/main.py`, but still imported by `tests/test_stream_citations.py`), `src/agents/upload/upload.py`
+  (unmounted duplicate upload router without auth), and `src/index.css` (stray CSS in the backend package).
+  Deleting files needs explicit user approval (`.claude/rules/scope-control.md`); the user chose to keep them.
+- **Decision:** Preserve all three unchanged in Phase 01 — no deletion or relocation. `ARCHITECTURE.md` labels
+  them as dead code. Removal is reconsidered in Phase 09 (operations), together with re-pointing or retiring the
+  `test_stream_citations.py` cases that import `mentor.py`.
+- **Consequences:** The files stay importable and must not be registered by accident; reviewers treat them as
+  out of scope. No runtime change.

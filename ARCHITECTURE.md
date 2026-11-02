@@ -1,10 +1,14 @@
 # UPSC Agentic AI — Architecture
 
-A multi-agent RAG backend for UPSC exam preparation. Built on FastAPI +
-LangGraph, with a supervisor that routes each user request to a specialised
-sub-agent (mentor, evaluator, planner, PYQ, NCERT, lecture, current affairs,
-upload/chat-with-doc). Retrieval is hybrid (dense + lexical) with RRF fusion,
-reranking, groundedness checks, and citation enforcement.
+A RAG backend for UPSC exam preparation, built on FastAPI + LangGraph. Mentor
+chat (`POST /agent/chat/stream`) goes through a LangGraph supervisor: one
+structured LLM routing call to one of 5 routes (mentor, planner, evaluator,
+current_affairs, rag). The mentor route is a ReAct tool-calling agent — the
+only autonomous agent. The other features (NCERT, PYQ, lecture, PDF chat, and
+the planner/evaluator/current-affairs pages) call plain feature functions in
+`src/agents/<feature>/graph.py` directly from their routes. Retrieval is dense
+vector search whose candidates are re-ranked by RRF over dense + lexical
+rankings; mentor answers carry formatted source citations.
 
 ---
 
@@ -14,8 +18,8 @@ reranking, groundedness checks, and citation enforcement.
 HTTP request
   -> src/api/main.py            (FastAPI app = `app`)
   -> src/api/routes/*.py        (per-feature endpoints, auth, rate limits)
-  -> src/graph/*.py             (LangGraph supervisor + RAG graph + tools)
-  -> src/agents/<agent>/graph.py(agent-specific LangGraph pipeline + prompts)
+  -> src/graph/*.py             (LangGraph supervisor + tools; mentor chat only)
+  -> src/agents/<feature>/graph.py (plain feature functions + prompts; not LangGraph)
   -> src/core/*.py              (LLM, retrieval, grounding, DB, security, ...)
   -> src/schemas.py             (Pydantic request/response contracts)
 ```
@@ -36,17 +40,20 @@ uv run uvicorn src.api.main:app --reload
 - `rate_limit.py`, `upload_limit.py` — request/upload throttling.
 - `routes/` — one module per feature:
   - `auth.py` — login / refresh / password reset.
-  - `chat.py` — general chat entry.
-  - `mentor.py`, `evaluator.py`, `planner.py`, `pyq.py`, `ncert.py`,
+  - `chat.py` — mentor chat entry (`/agent/chat/stream`, via the supervisor).
+  - `evaluator.py`, `planner.py`, `pyq.py`, `ncert.py`,
     `lecture.py`, `current_affairs.py`, `upload.py` — feature endpoints.
+  - `mentor.py` — legacy mentor router; **not registered** in `main.py` (dead code).
     Most expose a streaming route plus a `/sync` route that also returns
     structured (Pydantic-validated) data.
   - `history.py`, `feedback.py` — conversation history & user feedback.
 
-### `src/agents/` — feature sub-agents
-Each sub-agent is a self-contained package: `graph.py` (LangGraph pipeline) +
-`prompts.py` (prompt templates). Agents: `mentor`, `evaluator`, `planner`,
-`pyq`, `ncert`, `lecture`, `current_affairs`, `upload`.
+### `src/agents/` — feature logic
+Each feature is a self-contained package: `graph.py` (plain Python functions,
+despite the name — not a LangGraph graph) + `prompts.py` (prompt templates).
+Features: `mentor`, `evaluator`, `planner`, `pyq`, `ncert`, `lecture`,
+`current_affairs`, `upload`. (`upload/upload.py` is an unmounted duplicate
+router — dead code.)
 - `evaluator/` — grades answers/mains; output parsed into structured schemas
   by `src/core/eval_parse.py`.
 - `planner/` — builds study plans; `constants.py` holds domain constants,
@@ -55,10 +62,14 @@ Each sub-agent is a self-contained package: `graph.py` (LangGraph pipeline) +
   loading current-affairs sources into the vector store.
 
 ### `src/graph/` — orchestration
-- `supervisor.py` — routes a request to the right agent.
+- `supervisor.py` — one structured LLM routing call to one of 5 routes
+  (mentor chat only). Optional plan-execute escalation (`plan_execute.py`) is
+  off by default (`PLAN_EXECUTE_ENABLED`).
 - `app_graph.py` — top-level assembled graph.
-- `agent_subgraphs.py` — wires agents as subgraphs.
-- `rag_graph.py` — retrieval-augmented generation pipeline.
+- `agent_subgraphs.py` — wraps the planner/evaluator/current-affairs feature
+  functions as supervisor subgraphs.
+- `rag_graph.py` — corrective-RAG pipeline. Needs a `persist_key`, which no
+  HTTP route sets, so it only runs in `src/eval/llm_eval.py`.
 - `tools.py` — tool-calling agent (per-tier model resolution, tool loop,
   route description).
 - `mentor_graph.py`, `memory.py`, `profile.py`, `state.py` — mentor graph,
@@ -70,7 +81,8 @@ Each sub-agent is a self-contained package: `graph.py` (LangGraph pipeline) +
 - `model_router.py` — LITE vs STRONG tier routing heuristics.
 - `retrieval.py` — query rewriting, lexical/concept scoring, RRF fusion,
   reranking.
-- `vector_store.py` — vector DB (Qdrant / Chroma) access.
+- `vector_store.py` — vector DB access (Qdrant; required). The coded Chroma
+  fallback needs `langchain_chroma`, which is not installed.
 - `grounding.py` — citation extraction, source formatting, confidence.
 - `eval_parse.py` — parse evaluator markdown into `AnswerEvaluation` /
   `MainsEvaluation`.
@@ -105,11 +117,19 @@ Single module holding all Pydantic request/response models
 ## 3. Retrieval pipeline (RAG)
 
 1. **Query rewriting / expansion** (`retrieval.rewrite_query`).
-2. **Hybrid retrieval** — dense vectors + lexical overlap.
-3. **RRF fusion** (`reciprocal_rank_fusion`) merges ranked lists.
-4. **Rerank** (`rerank_scored_documents`) by concept coverage + overlap.
-5. **Grounded answer** (`grounding.compose_grounded_answer`) with enforced
-   citations and a trust/confidence note.
+2. **Dense retrieval** — vector similarity search in Qdrant. There is no
+   separate lexical index.
+3. **Lexical scoring + RRF** (`rerank_scored_documents`,
+   `reciprocal_rank_fusion`) — the dense candidates are scored by concept
+   coverage, and the dense and lexical rankings of those same candidates are
+   fused by RRF.
+4. **Optional cross-encoder** (`cross_encoder_rerank`) — off by default
+   (`RERANK_ENABLED`); the `local` provider needs `sentence-transformers`,
+   which is not a dependency.
+5. **Citations** — source lists and a trust/confidence note are formatted from
+   retrieval / tool results (`grounding.format_sources*`, `format_trust_note`).
+   `grounding.compose_grounded_answer` exists but is not called, so citations
+   are not enforced.
 
 ---
 

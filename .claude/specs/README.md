@@ -11,7 +11,7 @@ One spec per phase, named `phase-NN-<slug>.md`, created from `_TEMPLATE.md`.
 | Phase | Spec | Status |
 |---|---|---|
 | 00 | Workspace setup (no spec; see `../plans/phase-00-workspace.md`) | DONE |
-| 01 | `phase-01-baseline-safety-net.md` | STUB |
+| 01 | `phase-01-baseline-safety-net.md` | DONE (2026-11-02) |
 | 02 | `phase-02-security-ownership.md` | STUB |
 | 03 | `phase-03-request-path-performance.md` | STUB |
 | 04 | `phase-04-durable-jobs.md` | STUB |
