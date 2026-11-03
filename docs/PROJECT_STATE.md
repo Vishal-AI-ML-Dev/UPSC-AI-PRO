@@ -13,21 +13,23 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | 04 | Durable jobs | DONE (2026-11-02) — `docs/phase-reports/phase-04-report.md` |
 | 05 | Agent architecture truthfulness | DONE (2026-11-02) — `docs/phase-reports/phase-05-report.md` |
 | 06 | RAG quality — `.claude/specs/phase-06-rag-quality.md` | DONE (2026-11-03) — measurement + documentation; no production retrieval change (ADR-015) — `docs/phase-reports/phase-06-report.md` |
-| 07–09 | See `.claude/specs/README.md` | STUB (Phase 07 not started; wait for the user) |
+| 07 | LLM evaluation, safety & quality — `.claude/specs/phase-07-llm-eval-safety.md` | DONE (2026-11-03) — offline T1/T2 evals + prompt fencing fixes F0–F7 + budget-gated live harness; T3 live NOT RUN (bounds unvalidated, AC12 open by design; ADR-016) — `docs/phase-reports/phase-07-report.md` |
+| 08–09 | See `.claude/specs/README.md` (08 = product gaps, renumbered from 07) | STUB |
 
 ## The 8 workflows (must not regress)
 | Workflow | Backend entry | Frontend | Status (last verified) |
 |---|---|---|---|
-| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close); every message routed afresh — the first message's route no longer sticks to the conversation; supervisor has 4 routes, no `rag`; specialists store the question once, mentor history = coherent Q/A pairs; replies never echo the question (Phase 05, ADR-014); answers arrive whole, not token by token (pre-existing, backlog MED); offline smoke PASS 2026-11-02 (Phase 05 close) |
-| NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed) |
-| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02; parse/bank status/clear off the event loop, bank `sync=true` offloaded (Phase 03); bank upload job: heartbeat lease, deadline, no auto-retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close) |
-| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02; `*/sync` endpoints off the event loop (Phase 03) (Phase 03 close) |
-| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed) |
-| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke PASS 2026-11-02; `generate/sync` off the event loop (Phase 03) (Phase 03 close) |
-| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02; `process`/`process-text` off the event loop (Phase 03); lecture jobs: heartbeat lease, deadline, 1 transient retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close) |
-| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02; upload `sync=true` offloaded (Phase 03); upload job: heartbeat lease, deadline, no auto-retry (Phase 04 Amendment 1); offline smoke PASS 2026-11-02 (Phase 04 close) |
+| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close); every message routed afresh — the first message's route no longer sticks to the conversation; supervisor has 4 routes, no `rag`; specialists store the question once, mentor history = coherent Q/A pairs; replies never echo the question (Phase 05, ADR-014); answers arrive whole, not token by token (pre-existing, backlog MED); offline smoke PASS 2026-11-02 (Phase 05 close); student profile fenced (Phase 07 F4); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed); study aids fenced (Phase 07 F7); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02; parse/bank status/clear off the event loop, bank `sync=true` offloaded (Phase 03); bank upload job: heartbeat lease, deadline, no auto-retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close); bank context + parser input fenced (Phase 07 F1); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02; `*/sync` endpoints off the event loop (Phase 03) (Phase 03 close); answer/question fenced, parsed score bounded to [0, max] (Phase 07 F5/F6); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed); eval-only in Phase 07 (no app change); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke PASS 2026-11-02; `generate/sync` off the event loop (Phase 03) (Phase 03 close); eval-only in Phase 07 (no app change); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02; `process`/`process-text` off the event loop (Phase 03); lecture jobs: heartbeat lease, deadline, 1 transient retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close); chat + notes metadata fenced, `medium` allow-listed, study aids fenced (Phase 07 F3/F7); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02; upload `sync=true` offloaded (Phase 03); upload job: heartbeat lease, deadline, no auto-retry (Phase 04 Amendment 1); offline smoke PASS 2026-11-02 (Phase 04 close); chat + notes metadata fenced (Phase 07 F2); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
 
-Test suite status (2026-11-03, Phase 06 final remediation): `1272 passed, 2 skipped, 13 warnings` (the 2 skips are
+Test suite status (2026-11-03, Phase 07 close): `1520 passed, 2 skipped in 163.72s`. Offline evals (Phase 07): T1 33 pass /
+0 fail / 1 known gap, T2 72 pass / 0 fail; T3 live NOT RUN. Phase 06 final remediation: `1272 passed, 2 skipped, 13 warnings` (the 2 skips are
 file-symlink escape tests that need Windows symlink privilege; earlier Phase 06 runs: `1267 passed, 1 skipped`
 after round-1 remediation, `1231 passed` at the Stage 2 closeout; Phase 05 close: `1212 passed`; Phase 04 close: `1182 passed`;
 Phase 03 close: `1113 passed`;
@@ -73,7 +75,7 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 | 7 | Tokens in `localStorage` | MED | backlog |
 | 8 | ~~Upload size check relies on Content-Length; unbounded `_processed_cache`~~ CLOSED Phase 02 (byte-counted limits, bounded thread-safe per-user cache); upload memory ~2×50 MB/request open | MED | 03/04 |
 | 9 | 24 h semantic cache can serve stale time-sensitive answers — deferred by owner in Phase 06 (Backlog) | MED | backlog |
-| 10 | Eval gate tests CRAG path production never runs (Phase 06 added a retrieval benchmark over the production retrieval functions, ADR-015; the LLM eval gate is unchanged) | MED | 08 |
+| 10 | Eval gate tests CRAG path production never runs — PARTLY CLOSED Phase 07: offline T1/T2 workflow evals now run the 8 production functions (`evals/`, ADR-016); Phase 06 retrieval benchmark (ADR-015). Still open: the old `src/eval/` CRAG gate is unchanged, and real-model safety/quality/cost is UNVERIFIED until the owner validates the token bounds and runs T3 | MED | backlog (T3 owner run; `src/eval/` migration) |
 | 11 | In-memory store fallback when not Postgres | MED | 09 |
 | 12 | Migrations run per process; LangGraph tables outside Alembic | LOW–MED | 09 |
 | 13 | `/health` checks nothing; no readiness/backups | MED | 09 |
@@ -337,38 +339,121 @@ All items below were corrected in place; claim → evidence table in `docs/phase
   - Mentor KB hash reproducibility: `data/mentor_kb/` is outside the LF `.gitattributes` rule, so the recorded
     mentor_kb hash can differ across checkouts (chunking unaffected). Extending the rule needs owner approval.
 
-### Last handoff — 2026-11-03 (Phase 06 closed)
-- Active phase: none in progress. **Phase 06 RAG quality — DONE (2026-11-03).** Report:
-  `docs/phase-reports/phase-06-report.md`. ADR-015 (+ addenda). Phase 07 not started (wait for the user).
-- Outcome: retrieval measured with evidence-span labels. **No production retrieval change**: thresholds, ranking,
-  lexical/RRF re-order, k, chunking and indexing are unchanged. Threshold calibration, reranker and BM25 stay in the
-  Backlog.
-- Work done:
-  - Stage 1: baseline benchmark + dataset.
-  - Stage 2: docs-only closeout.
-  - Round-1 review remediation (S1, S2, Q1–Q6).
-  - Final remediation (SF-1, S-1, S-2, doc accuracy, LF `.gitattributes` for the evaluation assets only).
-  - Close: two documentation NITs (mentor KB hash reproducibility wording; stale SQLite note).
+- (Phase 07) **Scope gate misses creative-writing requests.** `src/core/scope_gate.py`: "Write a song about cricket
+  for my friend's birthday." and "write a poem about my cat" are ALLOWED (`reason=default`). `_CREATIVE_RE` only covers
+  shayari / love story / bedtime story, and the singing patterns need sing / gao. The mentor system prompt's scope rule
+  is the only remaining defence (real-model behaviour UNVERIFIED). Eval case `rt-scope-song` reports it as
+  `known_gap` — MED.
+- (Phase 07, ADR-016) **Token-bound validation procedure + T3 live run.** `evals/pricing.json` ships every model
+  `token_bound.status: "unvalidated"` with null prices, so live mode refuses. An owner-approved procedure is needed
+  to validate the `utf8_bytes` bound per model, e.g. compare provider-reported usage or `count_tokens` on a small
+  approved sample. After that the owner can fill in prices and authorise T3. Real-model safety, quality and cost stay
+  UNVERIFIED until then — OPEN.
+- (Phase 07) `evals/pricing.json` declares only the code-default models. A deployment configured with
+  non-default model ids is refused by the live gate as "not declared" until the owner adds entries for them — LOW.
+- (Phase 07) Live-mode client preflight reads `max_retries` from the raw Gemini embeddings client. Whether
+  `GoogleGenerativeAIEmbeddings` exposes it, and whether Gemini streaming responses carry `usage_metadata` (exit 4
+  otherwise), is UNVERIFIED without keys. Either would make live mode refuse or stop: fail-closed, but it may need
+  work before T3 — LOW.
+- (Phase 07 review, owner decision D) Recorded, not fixed — LOW:
+  - `evals/runners/run_production_evals.py` builds `_judge_bounds` twice per estimate (`build_estimate` and
+    `worst_single_input_bound`).
+  - `evals/runners/adapters.py:TOOL_AGENT_WORST_CASE_CALLS = 4` duplicates `src.graph.tools.DEFAULT_MAX_TOOL_LOOPS + 1`.
+  - A hard kill, or a locked file on Windows, can leave the run's `%TEMP%/upsc_evals_*` Qdrant dir behind. The live
+    embedding cache (`%TEMP%/upsc_evals/embedding_cache.json`) persists vectors of corpus / KB text between runs.
+  - Groq fallback live runs (`--allow-fallback`) always refuse: `src/core/llm.py:_make_groq` sets no output limit and a
+    hard-coded `max_retries`, and `run_models` ignores `groq_fallback_models`.
+- (Phase 07 final review NITs, recorded, not fixed) — LOW:
+  - An unreserved send is latched as `BudgetExceeded` (exit 3). It is really a coverage / config failure, so exit 2
+    would be more accurate (`evals/runners/budget.py:require_reservation`).
+  - `validate_live_config` checks single-request feasibility for the LLM caps only, not `--max-embedding-*`. The
+    runtime guard still enforces them.
+  - `worst_single_input_bound` is the largest prompt seen in the scripted pass; later tool-loop prompts can be
+    larger. The pre-run check only; runtime reservations use the real bytes.
+  - `JUDGE_TAG` is defined twice (`evals/evaluators/judge.py`, `evals/runners/budget.py`), with a "must equal"
+    comment.
+  - AC1 "reached" is the string the adapter returns after its call. The T1 prompt checks are the real evidence that
+    the prompts were built.
+  - `src/agents/lecture/graph.py` lines ~193-195: an unrelated `logger.warning` was rewrapped by `ruff format`.
+  - Live mode leaves non-LLM keys (`DATABASE_URL`, `QDRANT_API_KEY`, `TAVILY_API_KEY`, `COHERE_API_KEY`) in the
+    environment. No live-reached path uses them.
+  - The report-excerpt capture relies on `_plain_scored_search`. The `similarity_search` fallback branch
+    (`src/core/vector_store.py` ~760) is not captured.
+  - The lecture `medium` request field has no `max_length` (`src/schemas.py:162,177`). It is now harmless (allow-list).
+  - `sanitize_untrusted` runs at roughly 0.5-1 MB/s in pure Python. That is fine for the current bounded inputs;
+    don't run it over whole PDFs.
+  - The live embeddings preflight reads `GoogleGenerativeAIEmbeddings.max_retries`, which defaults to None, so live
+    mode always refuses today. `_with_request_timeout` rebuilds the client without retry options. Verify the real
+    retry behaviour before T3.
+  - Cyrillic / other-script homoglyph markers are not neutralised (documented).
+  - (Round-3 N-3, SUPERSEDED by the final budget review: one managed reservation now covers one send; see ADR-016)
+    A send that carries a run manager may be checked any number of times while its run is open. That
+    is safe for today's clients: SDK retries happen inside one `_generate` and are reserved as `1 + retries`. A
+    provider wrapper that re-sends from outside the SDK would not be counted. A client whose `_stream` calls
+    `self._generate(run_manager=None)` is refused (fail-closed).
+  - (Round-3 N-4) The two detectors disagree on a marker word split by a line break or (detector side) a combining mark
+    (`UNTRUS` + newline + `TED`). Production removes it; the eval detector does not count it, so such a production regression
+    would not show in evals.
+  - (Round-3 N-5) "...the END. UNTRUSTED sources?" is treated as a bare core marker by both detectors and becomes
+    "...the [marker removed]ources?" (rare study-text false positive). Since round 4 a replacement next to brackets
+    is limited to a few words, so a false positive can no longer delete long passages.
+  - (Round-5, accepted residuals of the word-bounded design; no exact marker can be produced):
+    - Three or more padding words between the bracket run and a glued marker word pass both the sanitiser and the
+      eval detector (`<<<aa bb cc xBEGIN_UNTRUSTED_SOURCE`). Widening the window would bring back the round-3 study-text
+      deletion.
+    - A noise word between the marker words (`<<<BEGIN x UNTRUSTED x SOURCE>>>`, `<<<END OF THE UNTRUSTED SOURCE ...>>>`)
+      is not neutralised by either; paraphrases are unbounded.
+    - The eval detector drops non-ASCII bracket look-alikes (`‹ ›`, `ᐸ ᐳ`, `≪ ≫`), so around them it can over-count
+      (spurious eval failures, never a missed production marker; 0 disagreements on an ASCII fuzz).
+    - The eval detector counts one hit per bracket segment; a second fragment in the same segment is not counted
+      separately.
+    - `LLMBudgetCallback` keeps entries for a run that never ends (an abandoned stream generator); negligible for one
+      eval run.
+  - (Round-4) Bracket-like letters beyond the mapped set (e.g. other scripts' angle-shaped letters) are not
+    neutralised when glued to the marker words. Cyrillic / other-script homoglyph letters remain uncovered
+    (documented).
+- (Phase 07) Unexplained: one offline CLI run (`run_production_evals` with stdout and stderr discarded) exited 5
+  (execution error). Three identical re-runs exited 0, and the in-process `_run` succeeded. The cause is unknown
+  because the stderr line naming the exception class was discarded — UNVERIFIED, LOW.
+- (Phase 07 review) Production usage tracking (`src/core/usage_tracker.py`) misses tool-bound and structured-output
+  model calls (mentor tool rounds, router). Callbacks bound with `with_config` are dropped by `bind_tools` /
+  `with_structured_output` (`src/core/llm.py:_with_tracing`). The eval live path re-attaches them; production does
+  not — LOW.
+- (Phase 07) Planner form fields (`goal`, `weak`, `optional`) and the mentor-KB `kb_context` reach `PLANNER_PROMPT`
+  unfenced (`src/agents/planner/graph.py:generate_plan`). These are the caller's own text plus first-party KB, so
+  self-injection only. The eval keeps an output-only canary check (`rt-planner-injection`) — LOW.
+- (Phase 07) `src/agents/evaluator/graph.py:_log_eval` still logs the raw, unbounded `Score: X/Y` to observability.
+  F6 bounds only the parsed API field — LOW.
+- (Phase 07) The eval harness records retrieved-chunk hashes through `vector_store._plain_scored_search`.
+  `mentor_kb.search_kb` queries the store directly, so mentor-KB chunks are not captured; only the injected test
+  passage is — LOW.
+- (Phase 07) All 60 eval cases are Claude-written (`human_verified: false`). Review them by hand before using them
+  as evidence for decisions — OPEN.
+
+### Last handoff — 2026-11-03 (Phase 07 closed)
+- Active phase: none in progress. **Phase 07 LLM evaluation, safety & quality — DONE (2026-11-03).** Report:
+  `docs/phase-reports/phase-07-report.md`. ADR-016 (+ addenda through the final budget review). Phase 08 (product gaps)
+  not started; wait for the user.
+- Outcome:
+  - Prompt fencing fixes F0–F7 in production.
+  - Offline T1/T2 eval harness in `evals/` (60 synthetic cases, all 8 workflows).
+  - Budget-gated live mode. The final budget review made ledger reservations, usage validation and the stop latch
+    atomic under one shared lock, and limited one managed reservation to one send.
+  - **T3 live NOT RUN (AC12 open by design).** Bounds ship `unvalidated`, so live mode refuses.
 - Final verified evidence (2026-11-03):
-  - `uv run pytest -q` → `1272 passed, 2 skipped, 13 warnings in 151.97s (0:02:31)`.
-  - `uv run pytest -q tests/test_bench_retrieval.py tests/test_retrieval_eval.py` → `68 passed, 2 skipped`.
-  - `uv run ruff check src tests scripts/bench_retrieval.py` → `All checks passed!`; compileall exit 0;
-    `git diff --check` exit 0.
-  - `scripts/bench_retrieval.py --cache-only --repeats 5` → exit 0, 0 texts sent, cache sha256 unchanged.
-  - Final reviews: security PASS (0 BLOCKING, 0 SHOULD-FIX); code quality no BLOCKING / no SHOULD-FIX. NITs are in
-    the Backlog.
-- Still UNVERIFIED: NCERT retrieval (owner-supplied gold set pending), real user uploads, production Qdrant
-  collections and server latency, live workflow smoke. Gold labels are Claude-written: all 97 entries
-  `human_verified: false` pending human review. The 2 skipped tests are file-symlink escape tests that need Windows
-  symlink privilege.
-- Repo hygiene: the `checkpoints.sqlite-shm` / `checkpoints.sqlite-wal` side files seen earlier in this session are
-  no longer present. Only the git-ignored `checkpoints.sqlite` remains (not opened by Claude).
-- Next step: the owner reviews and, if wanted, commits Phase 06. Then `/start-phase 7` when the owner asks.
-- Uncommitted changes:
-  - Modified: `.claude/specs/README.md`, `.claude/specs/phase-06-rag-quality.md`, `docs/DECISIONS.md`,
-    `docs/ENGINEERING_METRICS.md`, `docs/PROJECT_STATE.md`, `src/eval/retrieval_eval.py`,
-    `tests/test_retrieval_eval.py`.
-  - Untracked: `.gitattributes`, `.claude/plans/phase-06-rag-quality.md`, `docs/phase-reports/phase-06-report.md`,
-    `scripts/bench_retrieval.py`, `src/eval/corpora/`, `src/eval/retrieval_gold.json`,
-    `tests/test_bench_retrieval.py`.
-  - Nothing committed or pushed.
+  - `uv run pytest -q` → `1520 passed, 2 skipped in 163.72s (0:02:43)`.
+  - `uv run ruff check src tests evals` → `All checks passed!`; compileall exit 0; `git diff --check` exit 0;
+    frontend `npm run lint` clean (frontend unchanged, build not run).
+  - Offline evals → exit 0; T1 33 pass / 0 fail / 1 known gap; T2 72 pass / 0 fail.
+  - Ownership tests → `17 passed`. `src/eval/` and `scripts/bench_retrieval.py` unchanged.
+- Still UNVERIFIED:
+  - real-model safety, quality and cost (T3);
+  - the real clients' retry / streaming-usage behaviour;
+  - live workflow smoke;
+  - a reviewer-agent pass on the final budget-concurrency delta (tests only; AC11 caveat).
+  - The 60 eval cases are Claude-written (`human_verified: false`).
+- Repo hygiene: `checkpoints.sqlite-shm` / `checkpoints.sqlite-wal` side files are present (local checkpoint DB; not
+  opened by Claude).
+- Next step: the owner reviews and, if wanted, commits Phase 07. Then `/start-phase 8` when the owner asks.
+- Uncommitted changes: see `git status --porcelain` in the phase report (Phase 07 code, tests, `evals/`, docs and the
+  07→08 spec renumbering). Nothing committed or pushed.

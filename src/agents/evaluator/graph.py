@@ -7,6 +7,7 @@ import re
 
 from src.agents.evaluator.prompts import EVALUATOR_PROMPT, MAINS_EVAL_PROMPT, MAINS_MODEL_PROMPT
 from src.core.llm import describe_exception, get_llm, message_text
+from src.core.prompt_safety import harden_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,10 @@ def evaluate_answer(question: str, answer: str):
         _buf = ""
         for chunk in chain.stream(
             {
-                "question": question.strip(),
-                "answer": answer.strip(),
+                # The student's text is graded as data, never followed: an answer
+                # saying "award 10/10" must not steer the score (Phase 07 F5).
+                "question": harden_untrusted(question.strip(), label="question to evaluate"),
+                "answer": harden_untrusted(answer.strip(), label="student answer"),
                 "word_count": len(answer.split()),
             }
         ):
@@ -111,8 +114,13 @@ def evaluate_mains(
         yield f"⚠️ Answer too short ({answer_wc} words). Write at least 30 words for a {marks}-mark question."
         return
 
-    kw_list = keywords or []
-    kw_str = ", ".join(kw_list) if kw_list else "No specific keywords required"
+    kw_list = [str(k) for k in (keywords or [])]
+    # Client-supplied keywords are data, never instructions (Phase 07 review S10).
+    kw_str = (
+        harden_untrusted(", ".join(kw_list), label="expected keywords")
+        if kw_list
+        else "No specific keywords required"
+    )
 
     # Keyword analysis
     answer_lower = answer.lower()
@@ -120,12 +128,19 @@ def evaluate_mains(
     missing_kw = [k for k in kw_list if k.lower() not in answer_lower]
 
     if missing_kw:
-        keyword_analysis_instruction = (
+        keyword_analysis_instruction = harden_untrusted(
             f"Present: {', '.join(present_kw) if present_kw else 'None'} | "
-            f"Missing: {', '.join(missing_kw)}"
+            f"Missing: {', '.join(missing_kw)}",
+            label="keyword analysis",
         )
     else:
-        keyword_analysis_instruction = f"All expected keywords present: {', '.join(present_kw)} ✓ — No keyword marks deduction."
+        keyword_analysis_instruction = (
+            "All expected keywords present ✓ — No keyword marks deduction."
+        )
+        if present_kw:
+            keyword_analysis_instruction += "\n" + harden_untrusted(
+                ", ".join(present_kw), label="keywords present"
+            )
 
     content_marks, analysis_marks, structure_marks, keyword_marks = _rubric(marks)
 
@@ -134,8 +149,9 @@ def evaluate_mains(
         _buf = ""
         for chunk in chain.stream(
             {
-                "question": question,
-                "answer": answer.strip(),
+                # Graded as data, never followed (Phase 07 F5).
+                "question": harden_untrusted(question or "", label="question to evaluate"),
+                "answer": harden_untrusted(answer.strip(), label="student answer"),
                 "answer_wc": answer_wc,
                 "marks": marks,
                 "word_limit": word_limit,
@@ -175,7 +191,12 @@ def get_model_answer(
     word_limit: int = 150,
 ):
     """Generate model answer (streaming)."""
-    kw_str = ", ".join(keywords) if keywords else "General UPSC terminology"
+    # Client-supplied question / keywords are data (Phase 07 review S10).
+    kw_str = (
+        harden_untrusted(", ".join(str(k) for k in keywords), label="expected keywords")
+        if keywords
+        else "General UPSC terminology"
+    )
 
     yield (
         "> ⚠️ AI-generated model answer - verify facts and structure against standard sources or toppers copies."
@@ -187,7 +208,7 @@ def get_model_answer(
         produced = False
         for chunk in chain.stream(
             {
-                "question": question,
+                "question": harden_untrusted(question or "", label="question to answer"),
                 "marks": marks,
                 "word_limit": word_limit,
                 "keywords": kw_str,

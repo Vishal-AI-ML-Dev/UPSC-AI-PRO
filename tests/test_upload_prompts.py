@@ -106,7 +106,10 @@ def test_unconfirmed_book_is_not_named_as_source(notes_prompt, confidence):
 
 def test_high_confidence_book_is_named(notes_prompt):
     prompt = notes_prompt(_book("High"))
-    assert "Book/Source: Indian Polity" in prompt
+    # Phase 07 F2 (plan Amendment 1): the value is fenced on its own lines after
+    # the label, so check the fenced block that follows "Book/Source:".
+    after = prompt.split("Book/Source:", 1)[1].split("- Subject:", 1)[0]
+    assert "<<<BEGIN_UNTRUSTED_SOURCE>>>\nIndian Polity\n<<<END_UNTRUSTED_SOURCE>>>" in after
 
 
 def test_chat_does_not_name_unconfirmed_book(monkeypatch):
@@ -121,6 +124,9 @@ def test_chat_does_not_name_unconfirmed_book(monkeypatch):
 
     monkeypatch.setattr(ug, "get_llm", lambda: RunnableGenerator(stream))
     book_info = {"book": "Indian Polity", "confidence": "Low", "subject": "Polity", "paper": "GS2"}
-    assert "".join(ug.ask_upload("What is Part III?", "h", user_id="u1", book_info=book_info)) == "Answer."
+    assert (
+        "".join(ug.ask_upload("What is Part III?", "h", user_id="u1", book_info=book_info))
+        == "Answer."
+    )
     assert "Indian Polity" not in seen[0]
     assert UNCONFIRMED in seen[0]

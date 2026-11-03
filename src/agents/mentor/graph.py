@@ -23,6 +23,8 @@ functions, so importing this module stays cheap and side-effect-free.
 
 import logging
 
+from src.core.prompt_safety import clean_label, harden_untrusted  # stdlib-only module
+
 logger = logging.getLogger(__name__)
 
 # Official / trusted sources for live UPSC facts (dates, notifications, etc.)
@@ -126,5 +128,11 @@ def _build_student_context(ctx: dict | None) -> str:
         "Daily Hours": ctx.get("study_hours"),
         "Attempts": ctx.get("attempts"),
     }
-    lines = [f"- {k}: {v}" for k, v in fields.items() if v]
-    return "\n".join(lines) if lines else "No profile yet — infer from the question."
+    # The profile is stored from earlier messages / client input, so it is
+    # untrusted: each value is bounded to one short line and the block is fenced
+    # before it is folded into the mentor's SYSTEM prompt (Phase 07 F4).
+    values = {k: clean_label(v, "") if v else "" for k, v in fields.items()}
+    lines = [f"- {k}: {v}" for k, v in values.items() if v]
+    if not lines:
+        return "No profile yet — infer from the question."
+    return harden_untrusted("\n".join(lines), label="student profile")

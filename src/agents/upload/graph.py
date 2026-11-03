@@ -14,7 +14,7 @@ from pypdf import PdfReader
 from src.agents.upload.prompts import BOOK_DETECTION_PROMPT, CHAT_PROMPT, NOTES_PROMPT
 from src.core.errors import UserFacingError
 from src.core.llm import describe_exception, first_word_yes_no, get_llm, message_text
-from src.core.prompt_safety import format_chat_history, harden_untrusted
+from src.core.prompt_safety import fence_label, format_chat_history, harden_untrusted
 from src.core.vector_store import (
     create_vector_store,
     make_persist_key,
@@ -186,6 +186,23 @@ def _source_name(book_info: dict | None) -> str:
     return UNCONFIRMED_SOURCE
 
 
+def _metadata_fields(book_info: dict | None) -> dict:
+    """``book_name`` / ``subject`` / ``paper`` prompt values from ``book_info``.
+
+    ``book_info`` is client-sent (chat) or model-derived from the untrusted PDF
+    (notes), so every value is normalised and fenced (Phase 07 F2).
+    ``confidence`` only gates ``_source_name`` and is never rendered.
+    """
+    info = book_info if isinstance(book_info, dict) else {}
+    return {
+        "book_name": fence_label(
+            _source_name(info), UNCONFIRMED_SOURCE, label="document source name"
+        ),
+        "subject": fence_label(info.get("subject"), "General", label="document subject"),
+        "paper": fence_label(info.get("paper"), "Check Syllabus", label="document UPSC paper"),
+    }
+
+
 def detect_book(text: str) -> dict:
     """Detect if PDF is a known UPSC book."""
     try:
@@ -292,9 +309,8 @@ def process_upload(file_content: bytes, filename: str, *, user_id: str) -> dict:
             chain.invoke(
                 {
                     "text": harden_untrusted(text_for_notes, label="uploaded document"),
-                    "book_name": _source_name(book_info),
-                    "subject": book_info["subject"],
-                    "paper": book_info["paper"],
+                    # Model-derived from the untrusted PDF: fenced (Phase 07 F2).
+                    **_metadata_fields(book_info),
                 }
             ).content
         )
@@ -378,10 +394,6 @@ def ask_upload(
         yield "Could not find relevant content. Try rephrasing your question."
         return
 
-    book_name = _source_name(book_info)
-    subject = book_info.get("subject", "General") if book_info else "General"
-    paper = book_info.get("paper", "Check Syllabus") if book_info else "Check Syllabus"
-
     try:
         chain = CHAT_PROMPT | get_llm()
         produced = False
@@ -389,9 +401,8 @@ def ask_upload(
             {
                 "context": harden_untrusted(ctx, label="document excerpts"),
                 "question": question.strip(),
-                "book_name": book_name,
-                "subject": subject,
-                "paper": paper,
+                # Client-sent book_info: bounded + fenced (Phase 07 F2).
+                **_metadata_fields(book_info),
                 "history": format_chat_history(chat_history),
             }
         ):

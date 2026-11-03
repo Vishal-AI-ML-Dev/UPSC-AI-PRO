@@ -1,5 +1,7 @@
 """Offline tests for evaluator markdown -> Pydantic parsing (pure, no keys)."""
 
+import pytest
+
 from src.core.eval_parse import (
     parse_answer_evaluation,
     parse_mains_evaluation,
@@ -86,9 +88,12 @@ def test_parse_mains_evaluation():
     assert len(ev.improvements) == 3
 
 
-def test_mains_max_marks_from_text_overrides_default():
+def test_mains_uses_the_requested_max_and_rescales_a_different_written_max():
+    # Phase 07 F6 (owner decision): the REQUESTED marks are the maximum. Before,
+    # a model-written "12/15" on a 10-mark question returned 12/15; now it is
+    # rescaled onto the requested 10 marks.
     ev = parse_mains_evaluation("## 📊 Score: 12/15", max_marks=10)
-    assert ev.score == 12.0 and ev.max_marks == 15
+    assert ev.score == 8.0 and ev.max_marks == 10
 
 
 def test_empty_and_garbage_safe():
@@ -103,3 +108,38 @@ def test_gaps_not_polluted_by_keyword_analysis():
     joined = " ".join(ev.gaps).lower()
     assert "gst council" in joined
     assert "cooperative" not in joined  # keyword-analysis line must not leak into gaps
+
+
+# --- Phase 07 F6: scores never leave [0, max] --------------------------------
+@pytest.mark.parametrize(
+    "text, max_marks, expected",
+    [
+        ("## 📊 Score: 12/10", 10, None),  # above the max -> unscored, not 12/10
+        ("## 📊 Score: 10/10", 10, 10.0),
+        ("## 📊 Score: 0/10", 10, 0.0),
+        ("## 📊 Score: 9/15", 15, 9.0),
+        ("## 📊 Score: 6/10", 15, 9.0),  # rescaled onto the requested 15
+        ("## 📊 Score: 18/15", 10, None),  # out of range even before rescaling
+        ("## 📊 Score: 3/0", 10, None),  # zero maximum
+        ("no score at all", 10, None),
+    ],
+)
+def test_mains_score_is_bounded(text, max_marks, expected):
+    ev = parse_mains_evaluation(text, max_marks=max_marks)
+    assert ev.score == expected
+    assert ev.max_marks == max_marks
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("## Score: 11/10", None),
+        ("## Score: 7/10", 7.0),
+        ("## Score: 4/5", 8.0),  # rescaled onto the basic evaluator's 10
+        ("## Score: 2/0", None),
+    ],
+)
+def test_basic_score_is_bounded(text, expected):
+    ev = parse_answer_evaluation(text)
+    assert ev.score == expected
+    assert ev.max_score == 10

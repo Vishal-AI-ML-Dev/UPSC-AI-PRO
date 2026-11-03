@@ -1,6 +1,6 @@
-# Phase 07 — Product gaps
+# Phase 08 — Product gaps
 
-Status: STUB  ·  Related audit sections: Q, R
+Status: STUB (renumbered from Phase 07 on 2026-11-03; Phase 07 became LLM eval & safety)  ·  Related audit sections: Q, R
 
 ## Goal
 Turn placeholder dashboard and planner features into real, persisted, user-scoped features.

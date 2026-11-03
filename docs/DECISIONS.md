@@ -304,3 +304,165 @@ Append new ADRs; never rewrite accepted ones — supersede them.
     - `.gitattributes` keeps LF for `src/eval/retrieval_gold.json` and `src/eval/corpora/**` only, so the recorded
       hashes and chunking reproduce on Windows checkouts.
     - No measurement or decision changed.
+
+## ADR-016 — Workflow evals in `evals/`, three evidence tiers, fenced metadata, live evals gated on validated bounds
+2026-11-03 · Accepted (Phase 07; owner decisions in `.claude/specs/phase-07-llm-eval-safety.md`, Revision 3; amends
+ADR-003)
+- **Context:**
+  - The only LLM eval (`src/eval/llm_eval.py`) scored the CRAG graph, which production never runs, on 3 NCERT rows.
+  - Several untrusted values reached prompts unfenced:
+    - upload `book_info` and lecture `topic_info` / `medium`;
+    - model-derived notes metadata;
+    - the PYQ bank and parser input;
+    - the student profile in the mentor system prompt;
+    - the evaluator's student answer;
+    - study-aids material.
+  - The sanitiser removed only exact fence markers, so look-alike variants survived.
+  - Evaluator scores were unbounded: a "12/10" was accepted, and a model-written maximum replaced the requested
+    marks.
+- **Decision (directory ownership):**
+  - `evals/` holds the workflow-evaluation harness: datasets, runners, evaluators, git-ignored reports.
+  - `src/eval/` keeps the shared eval helpers (`JudgeScore`, judge prompts, `gates.py`), the CRAG `llm_eval` and the
+    Phase 06 retrieval eval. It is unchanged and still run by CI.
+  - `evals/` may import from `src/eval/`, never the reverse.
+  - The full migration that ADR-003 planned for "the evals phase" is deferred to a separately approved change.
+- **Decision (evidence tiers):** every report keeps three tiers separate.
+  - **T1:** offline prompt-construction checks.
+  - **T2:** offline scripted behaviour, with fake models.
+  - **T3:** owner-run live models.
+  - T1/T2 are never cited as real-model safety or quality.
+- **Decision (offline isolation):** offline runs fail closed.
+  - Keys and service URLs are blanked.
+  - `connect`, `connect_ex`, `create_connection` and `getaddrinfo` are blocked and counted.
+  - Real-client constructors are tripwired.
+  - A temp embedded Qdrant is used, with fake embeddings and eval-scoped owned keys.
+  - Every change is undone on success and on error, and the model caches are reset afterwards.
+- **Decision (judge):**
+  - One pinned model: `gemini-2.5-flash`, temperature 0, no fallback.
+  - The system message is fixed text. The question, the evidence and the answer each go in their own fence in the
+    human message.
+  - A judge error is excluded from means, never scored 0.
+  - The judge is disclosed as the same model family as the app.
+  - Judge scores are report-only.
+- **Decision (metadata rule):**
+  - Every client-sent or model-derived metadata value that is rendered into a prompt goes through
+    `fence_label(value, default, label)`, which is `harden_untrusted(clean_label(...))`.
+  - `clean_label` only normalises: one line, markers stripped, at most 120 characters. It is not a security control.
+  - Control-only fields (`book_info.confidence`) are never rendered.
+  - The sanitiser also neutralises marker look-alikes: variants are replaced by `[marker removed]`, including
+    Unicode-disguised, nested and stuck-character forms (see the remediation addenda).
+- **Decision (scores):** evaluator scores use the requested maximum. A score written against another maximum is
+  rescaled. Anything outside `[0, max]` becomes `None` ("unscored").
+- **Decision (live budget):** live mode budgets every role (workflow, judge, embedding).
+  - A shared ledger is enforced before each send. This happens in two independent places: an LLM callback with
+    `raise_error=True` that reserves (1 + SDK `max_retries`) sends per attempt, and an embedding guard under the
+    cache.
+  - The first stop latches.
+  - Five caps are required, including a total cost cap across all roles.
+  - The `utf8_bytes` token bound is an **experimental estimate**.
+  - Live mode refuses, before any client is built, unless every model it can reach has owner-recorded prices and a
+    `validated` token bound (with date and evidence).
+  - Live mode also refuses if usage can't be checked, if a client's retries or output limit don't match the budget,
+    or if one worst-case request alone exceeds a cap.
+  - `evals/pricing.json` ships every model `unvalidated`, so **T3 is disabled** until the owner approves a validation
+    procedure.
+- **Consequences:**
+  - Offline evals run in pytest and in the CLI. The "before" run had 21 failing T1 checks; the "after" run has 0.
+  - One documented scope-gate gap is reported as `known_gap`, not hidden (Backlog).
+  - Real-model safety, quality and cost stay UNVERIFIED.
+  - All eval cases are Claude-written (`human_verified: false`).
+  - Prompt templates are unchanged; fenced values appear on their own lines.
+  - One existing test assertion was updated for that format (plan Amendment 1).
+- **Addendum (review remediation, owner-approved B1 / S1–S10 / NITs; 2026-11-03):**
+  - **Fence markers (B1, S5):**
+    - Detection runs on a per-character NFKC skeleton: format characters (Cf) dropped, bracket look-alikes mapped,
+      separators ignored.
+    - Only the matched spans of the original text are replaced. The replacement is the non-empty
+      `[marker removed]`, repeated until nothing matches (bounded, linear time). Head and tail fragments are
+      replaced too.
+    - Nested markers can no longer rebuild an exact marker.
+    - The eval-side detector is independent: it collapses the text to `[a-z0-9]` and counts marker words.
+    - Not covered: homoglyph letters from other scripts.
+  - **Lecture output language (S6):** allow-listed (English / Hindi / Hinglish, default English) and rendered as
+    trusted text, not fenced. Mains keywords and the model-answer question / keywords are fenced (S10).
+  - **Live budget (S1–S4, NITs):**
+    - Enforced at three points on one ledger:
+      - the LLM callback, re-attached to tool-bound and structured-output models and to the judge;
+      - a send guard patched into every production client's send methods (`_TimeoutGuard`), which refuses any send
+        without a reservation;
+      - the embedding guard.
+    - The judge client passes the same retry and output-limit preflight as the workflow clients.
+    - `--sdk-max-retries` below 1 is refused, because 0 means the Gemini default of 5 retries.
+    - Only the repository's `evals/pricing.json` is accepted; the owner may edit its contents.
+    - A non-interactive live start needs `UPSC_EVALS_LIVE_CONFIRM=RUN` in addition to `--yes` and every cap.
+    - An undeclared model at send time stops the run with exit 2.
+    - Judge inputs are cut to fixed byte budgets, so the judge input has an exact byte bound.
+    - A NaN judge score is a `judge_error`.
+  - **Runner (S8, NITs):**
+    - Exit 5 = execution error, never a safety result.
+    - `known_gap` downgrades only its declared check.
+    - Report excerpts are matched after case and whitespace folding, and omitted when the sources are not fully
+      captured.
+    - Live reports carry their own disclaimer.
+    - Offline isolation also blocks UDP sends, resets LangSmith's env cache and restores the response-cache / Upstash
+      / NCERT-storage / usage-tracker globals.
+  - **Final review (B-1, SF-1, SF-2, S-1, S-2):**
+    - Marker fragments anchored by brackets are always replaced. Only the bracket-less core needs a word boundary,
+      so study text like "untrusted sources" is kept. A rejected core match re-searches from the next character.
+    - Invisible Default_Ignorable letters (Hangul fillers, combining grapheme joiner, variation selectors) are
+      dropped like Cf.
+    - The eval detector now keeps brackets and has the same boundary rule, implemented independently.
+    - Judge inputs are sanitised before they are cut to their byte budget, which makes the judge byte bound exact.
+    - `BaseChatModel.stream` calls `_stream` without a run manager. The send guard therefore lets an unmanaged send
+      claim the latest unclaimed reservation of its thread, once.
+  - **Round-3 review (SF-1, SF-2, N-1, N-2):**
+    - A linear bracket-segment pass replaces marker words glued to a bracket run by ANY number of stuck characters
+      (`<<<00000END_UNTRUSTED_SOURCE00000>>>`, `<<<END0UNTRUSTED0SOURCE>>>`). The eval detector does the same with
+      its own independent, linear segment scan; its earlier quadratic regex is gone.
+    - The budget callback runs inline (`run_inline = True`), so async reservations are made on the event-loop
+      thread.
+    - Unclaimed reservations live in one lock-protected run-id -> thread map, so a reservation claimed from any
+      thread can never be claimed again.
+    - Tests cover invoke, stream, a reserved `astream`, an unreserved `ainvoke` and the cross-thread case.
+  - **Round-4 review (SF-A, SF-B, SF-1, N-B, N-C):**
+    - The bracket-segment pass is word-bounded. Its round-3 form could delete long stretches of study text between a
+      "<<" and a distant "untrusted".
+      - Head: BEGIN / END sits in the first or second word after >= 2 "<", with UNTRUSTED in the same or the next
+        word.
+      - Tail: SOURCE sits in the last or second-to-last word before >= 2 ">", with UNTRUSTED in the same or the
+        previous word.
+      - Any number of stuck characters inside those words is still tolerated, and decoy UNTRUSTED words no longer
+        hide a marker.
+    - Canadian syllabics U+1438 / U+1433 map to "<" / ">".
+    - The eval detector applies the same word rules in its own code, for ASCII brackets only: it drops non-ASCII
+      bracket look-alikes instead of mapping them. It is linear on long space / dot runs.
+    - A run claimed by an unmanaged send can no longer also pass a later run-id check, so one reservation covers
+      one send.
+  - **Round-5 review:**
+    - Combining marks (Mn / Me) are skipped in the detection skeleton without a word break, so an accent inside
+      "UNTRUSTED" no longer splits the word.
+    - The managed reservation check is one atomic check-and-claim.
+    - Tests pin non-ASCII bracket look-alikes with stuck characters in production.
+    - Accepted residuals (Backlog):
+      - three or more padding words between the bracket run and a glued marker word;
+      - a noise word between the marker words;
+      - the detector over-counts around non-ASCII bracket look-alikes;
+      - the detector counts one hit per segment.
+  - **Final budget review (2026-11-03):**
+    - `BudgetLedger` holds one re-entrant lock (`_lock`). Every reservation (LLM and embedding) does the stop check,
+      every cap check (including the shared total-cost cap) and the counter update as one transaction under it.
+      `record_llm_usage` detects invalid usage, updates the actual-usage counters, compares against the bound and
+      latches the stop in the same transaction. A concurrent reservation cannot pass a cap that only one fits, and
+      cannot slip in between detecting invalid usage and the stop latch.
+    - Lock order is always callback -> ledger; the ledger never takes another lock. `LLMBudgetCallback._lock` guards
+      only the callback's own maps, and `on_chat_model_start` checks for a duplicate run, reserves and registers in one
+      locked step (a run seen twice, even concurrently, is charged once).
+    - **One managed reservation = one send.** `require_reservation` returns a scope that `install_send_guard` holds
+      open for the whole send. Nested checks of the same run while the scope is open (`_agenerate` -> `_generate` ->
+      `_stream`, including from an executor thread) pass. Once the outermost scope exits, another send with that run
+      id is refused and latched. This supersedes the round-3 N-3 residual ("checked any number of times while its run
+      is open").
+    - Accepted residual: two sends that overlap in time and share one run manager look like one send with a nested
+      check. LangChain gives every invoke its own run manager.
+    - Deterministic tests (barrier/event interleaving) fail with the locks replaced by no-op locks and pass with them.
+  - **No decision above changes.** T3 stays disabled; real-model results stay UNVERIFIED.

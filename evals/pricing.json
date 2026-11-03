@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "note": "Phase 07 live-eval price and token-bound declarations. Claude never fills prices and never marks a bound validated. Only the owner may set token_bound.status to \"validated\", and only together with validated_on and evidence (separate approval). Any null price or unvalidated bound makes live mode refuse before any client is built or request sent.",
+  "verified_on": null,
+  "models": {
+    "gemini-2.5-flash": {
+      "roles": ["workflow", "judge"],
+      "input_usd_per_million": null,
+      "output_usd_per_million": null,
+      "verified_on": null,
+      "token_bound": {"method": "utf8_bytes", "status": "unvalidated", "validated_on": null, "evidence": null, "provider_usage_check": "required"}
+    },
+    "gemini-2.5-flash-lite": {
+      "roles": ["workflow"],
+      "input_usd_per_million": null,
+      "output_usd_per_million": null,
+      "verified_on": null,
+      "token_bound": {"method": "utf8_bytes", "status": "unvalidated", "validated_on": null, "evidence": null, "provider_usage_check": "required"}
+    },
+    "llama-3.3-70b-versatile": {
+      "roles": ["workflow"],
+      "input_usd_per_million": null,
+      "output_usd_per_million": null,
+      "verified_on": null,
+      "token_bound": {"method": "utf8_bytes", "status": "unvalidated", "validated_on": null, "evidence": null, "provider_usage_check": "required"}
+    },
+    "llama-3.1-8b-instant": {
+      "roles": ["workflow"],
+      "input_usd_per_million": null,
+      "output_usd_per_million": null,
+      "verified_on": null,
+      "token_bound": {"method": "utf8_bytes", "status": "unvalidated", "validated_on": null, "evidence": null, "provider_usage_check": "required"}
+    },
+    "gemini-embedding-001": {
+      "roles": ["embedding"],
+      "input_usd_per_million": null,
+      "output_usd_per_million": null,
+      "verified_on": null,
+      "token_bound": {"method": "utf8_bytes", "status": "unvalidated", "validated_on": null, "evidence": null, "provider_usage_check": "unavailable"}
+    }
+  }
+}

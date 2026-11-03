@@ -8,9 +8,11 @@ reliably inside Streamlit components.html().
 import html
 import json
 import logging
+import re
 
 from src.core.llm import describe_exception, get_fast_llm, message_text
 from src.core.observability import trace_config
+from src.core.prompt_safety import fence_label, harden_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,9 @@ Rules:
 - Each prelims MCQ has exactly 4 plain options (do NOT prefix them with A/B/C/D). "answer" must be one of A, B, C, D.
 - Keep language simple and exam-focused.
 """
+
+
+_PLACEHOLDER_RE = re.compile(r"<<(?:TOPIC|PAPER|TEXT)>>")
 
 
 def _safe_json(raw: str):
@@ -183,12 +188,15 @@ def generate_study_aids(text: str, topic: str = "", paper: str = ""):
     if not text or not text.strip():
         return "", ""
 
-    material = text[:12000]
-    prompt = (
-        _AIDS_PROMPT.replace("<<TOPIC>>", topic or "General")
-        .replace("<<PAPER>>", paper or "General Studies")
-        .replace("<<TEXT>>", material)
-    )
+    # The material (raw transcript / chapter text) and the model-derived topic /
+    # paper are untrusted: fence them (Phase 07 F7). One-pass substitution, so a
+    # placeholder inside a value is never expanded.
+    values = {
+        "<<TOPIC>>": fence_label(topic, "General", label="study topic"),
+        "<<PAPER>>": fence_label(paper, "General Studies", label="UPSC paper"),
+        "<<TEXT>>": harden_untrusted(text[:12000], label="study material"),
+    }
+    prompt = _PLACEHOLDER_RE.sub(lambda m: values[m.group(0)], _AIDS_PROMPT)
 
     try:
         # Study aids are structured JSON generation, not deep reasoning, so use

@@ -70,13 +70,34 @@ def _verdict(text):
     return m.group(1).strip() if m and m.group(1).strip() else None
 
 
-def parse_answer_evaluation(text):
-    """Parse EVALUATOR_PROMPT (basic) output into AnswerEvaluation."""
+def bounded_score(score, written_max, target_max):
+    """Score on the REQUESTED scale, or None ("unscored") - Phase 07 F6.
+
+    A score written against a different maximum (e.g. "12/15" for a 10-mark
+    question) is rescaled onto ``target_max``. Anything still outside
+    ``[0, target_max]`` - "12/10", a zero maximum - becomes None, so an
+    out-of-range number (e.g. one an answer talked the model into) is never shown.
+    """
+    if score is None or not target_max or target_max <= 0:
+        return None
+    if written_max is not None:
+        if written_max <= 0 or score > written_max:
+            return None
+        if written_max != target_max:
+            score = score / written_max * target_max
+    if not 0 <= score <= target_max:
+        return None
+    return round(score, 2)
+
+
+def parse_answer_evaluation(text, *, max_score=10):
+    """Parse EVALUATOR_PROMPT (basic) output into AnswerEvaluation (scored out of
+    ``max_score``; the basic evaluator always asks for /10)."""
     text = text or ""
-    score, max_score = parse_score(text)
+    score, written_max = parse_score(text)
     return AnswerEvaluation(
-        score=score,
-        max_score=max_score or 10,
+        score=bounded_score(score, written_max, max_score),
+        max_score=max_score,
         did_well=_list_items(_section_block(text, ("did well", "what you did", "strength"))),
         missing=_list_items(_section_block(text, ("missing", "what's missing", "gap"))),
         improvements=_list_items(_section_block(text, ("improvement", "priority"))),
@@ -86,10 +107,10 @@ def parse_answer_evaluation(text):
 def parse_mains_evaluation(text, *, max_marks=10):
     """Parse MAINS_EVAL_PROMPT output into MainsEvaluation."""
     text = text or ""
-    score, parsed_max = parse_score(text)
+    score, written_max = parse_score(text)
     return MainsEvaluation(
-        score=score,
-        max_marks=parsed_max or max_marks,
+        score=bounded_score(score, written_max, max_marks),
+        max_marks=max_marks,
         verdict=_verdict(text),
         strengths=_list_items(_section_block(text, ("strength",))),
         gaps=_list_items(_section_block(text, ("gap", "missing"))),

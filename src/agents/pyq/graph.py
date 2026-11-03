@@ -14,6 +14,7 @@ from src.agents.pyq.prompts import (
     VERIFY_PROMPT,
 )
 from src.core.llm import get_llm, message_text
+from src.core.prompt_safety import harden_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +345,9 @@ def parse_questions(text: str) -> list[dict]:
     raw = ""
     try:
         chain = PARSER_PROMPT | get_llm()
-        raw = message_text(chain.invoke({"text": text.strip()}).content)
+        # Pasted text is untrusted (Phase 07 F1): fence it before the parser prompt.
+        pasted = harden_untrusted(text.strip(), label="pasted question text")
+        raw = message_text(chain.invoke({"text": pasted}).content)
     except Exception as e:
         logger.error(f"Parser LLM call failed: {e}")
     questions = _coerce_questions(_extract_json_questions(raw))
@@ -574,7 +577,8 @@ def _generate_grounded(
         raw = message_text(
             chain.invoke(
                 {
-                    "context": ctx,
+                    # The user's own uploaded material is untrusted (Phase 07 F1).
+                    "context": harden_untrusted(ctx, label=f"{label} excerpts"),
                     "topic": (topic or "").strip() or default_topic,
                     "question_type": question_type,
                     "num_questions": num_questions,

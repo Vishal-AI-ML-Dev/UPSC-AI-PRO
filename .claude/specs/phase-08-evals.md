@@ -1,6 +1,6 @@
 # Phase 08 — Evals
 
-Status: STUB  ·  Related audit sections: O, U#10
+Status: SUPERSEDED (2026-11-03) by `phase-07-llm-eval-safety.md` — kept for history. The `src/eval/` → `evals/` move is deferred to a separately approved change (ADR-016).  ·  Related audit sections: O, U#10
 
 ## Goal
 Evals that measure the production paths, organised under `evals/`.
