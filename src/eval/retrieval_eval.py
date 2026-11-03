@@ -28,13 +28,23 @@ Usage::
     uv run python -m src.eval.retrieval_eval
     uv run python -m src.eval.retrieval_eval --k 5 --gate 0.7 --strict \
         --report src/eval/retrieval_eval_report.md
+
+Phase 06 adds evidence-span metrics (``span_hits``, ``recall_at_k``,
+``mrr_at_k``, ``ndcg_at_k``, ``paired_bootstrap_ci`` and the threshold
+helpers) used by ``scripts/bench_retrieval.py`` with ``retrieval_gold.json``.
+There, relevance is a verbatim gold quote contained in a chunk, which does not
+depend on the lexical arm's term matching, so recall@k is well defined
+(fraction of a query's gold quotes found in the top k).
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import logging
+import math
+import random
 import re
 import sys
 from pathlib import Path
@@ -152,6 +162,198 @@ def compare_summaries(dense: dict, hybrid: dict) -> dict:
         "hit_dense": dense.get("hit_at_k", 0.0),
         "hit_hybrid": hybrid.get("hit_at_k", 0.0),
         "hit_lift": round(hybrid.get("hit_at_k", 0.0) - dense.get("hit_at_k", 0.0), 3),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Evidence-span relevance + rank metrics (Phase 06; pure, stdlib only)
+# --------------------------------------------------------------------------- #
+_MARKUP_RE = re.compile(r"[*`]")
+
+
+def normalize_span(text: str) -> str:
+    """Case-fold, drop markdown emphasis/code marks and collapse whitespace."""
+    return re.sub(r"\s+", " ", _MARKUP_RE.sub("", text or "").lower()).strip()
+
+
+def span_hits(chunk_text: str, quotes: list[str]) -> set[int]:
+    """Indices of the gold ``quotes`` contained verbatim (normalised) in a chunk."""
+    haystack = normalize_span(chunk_text)
+    return {
+        i for i, q in enumerate(quotes or []) if normalize_span(q) and normalize_span(q) in haystack
+    }
+
+
+def ranked_span_hits(ranked_texts: list[str], quotes: list[str]) -> list[set[int]]:
+    """Per-rank sets of gold-quote indices for an ordered list of chunk texts."""
+    return [span_hits(text, quotes) for text in ranked_texts]
+
+
+def recall_at_k(hits: list[set[int]], n_gold: int, k: int) -> float:
+    """Fraction of the query's gold quotes covered by the top-k chunks (0.0 if no gold)."""
+    if n_gold <= 0 or k <= 0:
+        return 0.0
+    covered: set[int] = set()
+    for h in hits[:k]:
+        covered |= h
+    return round(len(covered) / n_gold, 6)
+
+
+def mrr_at_k(hits: list[set[int]], k: int) -> float:
+    """1 / rank of the first chunk containing any gold quote within the top k."""
+    for rank, h in enumerate(hits[:k], start=1):
+        if h:
+            return round(1.0 / rank, 6)
+    return 0.0
+
+
+def _dcg(hits: list[set[int]], grades: list[int], k: int) -> float:
+    """DCG@k where each gold quote earns its grade once, at its first covering rank."""
+    seen: set[int] = set()
+    dcg = 0.0
+    for rank, h in enumerate(hits[:k], start=1):
+        new = h - seen
+        seen |= h
+        gain = sum(grades[i] for i in new if 0 <= i < len(grades))
+        if gain:
+            dcg += gain / math.log2(rank + 1)
+    return dcg
+
+
+def ideal_dcg(chunk_hits: list[set[int]], grades: list[int], k: int) -> float:
+    """Best achievable DCG@k given which quotes each corpus chunk contains.
+
+    ``chunk_hits`` lists, for every chunk of the corpus, the gold-quote indices it
+    contains (empty sets are ignored). Several quotes can share one chunk, so the
+    ideal ranking is an ordering of real chunks, not "one quote per rank". Exact
+    search over orderings of the distinct relevant chunks (at most a handful per
+    query); falls back to a greedy order above 8 distinct chunks.
+    """
+    distinct = list({frozenset(h) for h in chunk_hits if h})
+    if k <= 0 or not distinct:
+        return 0.0
+    depth = min(k, len(distinct))
+    if len(distinct) <= 8:
+        return max(
+            _dcg([set(c) for c in perm], grades, k)
+            for perm in itertools.permutations(distinct, depth)
+        )
+    order: list[set[int]] = []
+    covered: set[int] = set()
+    remaining = [set(c) for c in distinct]
+    while remaining and len(order) < depth:
+        best = max(remaining, key=lambda c: sum(grades[i] for i in c - covered))
+        order.append(best)
+        covered |= best
+        remaining.remove(best)
+    return _dcg(order, grades, k)
+
+
+def ndcg_at_k(
+    hits: list[set[int]],
+    grades: list[int],
+    k: int,
+    *,
+    ideal_hits: list[set[int]] | None = None,
+) -> float:
+    """Graded NDCG@k with a log2 discount.
+
+    Each gold quote earns its grade once, at the first rank whose chunk contains
+    it (a duplicate or overlapping chunk earns nothing again).
+
+    Ideal DCG (Phase 06 review Q5):
+    * ``ideal_hits`` given (the per-chunk quote sets of the whole corpus): the
+      ideal is the best achievable ordering of real chunks (:func:`ideal_dcg`).
+      Any real ranking is then <= the ideal, so no cap is needed. This is the
+      definition used by ``scripts/bench_retrieval.py`` from the corrected run on.
+    * ``ideal_hits`` omitted (legacy, Stage 1 baseline): the ideal places one
+      quote per rank in descending grade. When one chunk holds several quotes the
+      real DCG can exceed that ideal, so the value is capped at 1.0, which makes
+      different orderings of such chunks indistinguishable.
+    """
+    if k <= 0 or not grades:
+        return 0.0
+    dcg = _dcg(hits, grades, k)
+    if ideal_hits is not None:
+        idcg = ideal_dcg(ideal_hits, grades, k)
+    else:
+        ideal = sorted(grades, reverse=True)[:k]
+        idcg = sum(g / math.log2(rank + 1) for rank, g in enumerate(ideal, start=1))
+    if idcg <= 0:
+        return 0.0
+    return round(min(1.0, dcg / idcg), 6)
+
+
+def gold_dropped_by_threshold(
+    hits: list[set[int]],
+    scores: list[float | None],
+    threshold: float,
+    k: int,
+    *,
+    none_passes: bool = True,
+) -> bool:
+    """True when a gold chunk is in the top k but every gold chunk is filtered out.
+
+    That is: retrieval found the evidence, and the relevance threshold then hid it
+    from the model. ``None`` scores follow the production function being modelled:
+    ``similarity_search_with_sources`` and ``mentor_kb.search_kb`` KEEP chunks with a
+    ``None`` score (``none_passes=True``); ``similarity_search`` (PDF, Lecture, PYQ)
+    DROPS them (``none_passes=False``).
+    """
+    gold_scores = [s for h, s in zip(hits[:k], scores[:k]) if h]
+    if not gold_scores:
+        return False
+    return not any(_passes(s, threshold, none_passes) for s in gold_scores)
+
+
+def any_above_threshold(
+    scores: list[float | None], threshold: float, k: int, *, none_passes: bool = True
+) -> bool:
+    """True when at least one of the top-k chunks passes the threshold.
+
+    ``none_passes`` as in :func:`gold_dropped_by_threshold`.
+    """
+    return any(_passes(s, threshold, none_passes) for s in scores[:k])
+
+
+def _passes(score: float | None, threshold: float, none_passes: bool) -> bool:
+    if score is None:
+        return none_passes
+    return score >= threshold
+
+
+def paired_bootstrap_ci(
+    baseline: list[float],
+    candidate: list[float],
+    *,
+    resamples: int = 10_000,
+    seed: int = 0,
+    confidence: float = 0.95,
+) -> dict:
+    """Paired, query-level bootstrap CI for ``mean(candidate - baseline)``.
+
+    Queries are resampled with replacement (same indices for both systems), so the
+    interval reflects per-query differences. Deterministic for a given seed.
+    ``significant`` is True only when the interval excludes 0.
+    """
+    if len(baseline) != len(candidate):
+        raise ValueError("paired bootstrap needs equal-length lists")
+    n = len(baseline)
+    if n == 0:
+        return {"n": 0, "delta": 0.0, "low": 0.0, "high": 0.0, "significant": False}
+    diffs = [c - b for b, c in zip(baseline, candidate)]
+    delta = sum(diffs) / n
+    rng = random.Random(seed)
+    means = sorted(sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(resamples))
+    tail = (1.0 - confidence) / 2.0
+    low = means[int(tail * (resamples - 1))]
+    high = means[int((1.0 - tail) * (resamples - 1))]
+    return {
+        "n": n,
+        "delta": round(delta, 6),
+        "low": round(low, 6),
+        "high": round(high, 6),
+        "significant": low > 0 or high < 0,
     }
 
 

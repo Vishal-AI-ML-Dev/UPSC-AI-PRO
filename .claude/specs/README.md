@@ -16,7 +16,7 @@ One spec per phase, named `phase-NN-<slug>.md`, created from `_TEMPLATE.md`.
 | 03 | `phase-03-request-path-performance.md` | DONE (2026-11-02) |
 | 04 | `phase-04-durable-jobs.md` | DONE (2026-11-02) |
 | 05 | `phase-05-agent-architecture.md` | DONE (2026-11-02) |
-| 06 | `phase-06-rag-quality.md` | STUB |
+| 06 | `phase-06-rag-quality.md` | DONE (2026-11-03) |
 | 07 | `phase-07-product-gaps.md` | STUB |
 | 08 | `phase-08-evals.md` | STUB |
 | 09 | `phase-09-operations.md` | STUB |

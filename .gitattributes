@@ -1,0 +1,5 @@
+# Phase 06 evaluation assets only (no repository-wide line-ending policy).
+# Keep LF on every OS so their recorded sha256 and production chunking reproduce
+# (docs/ENGINEERING_METRICS.md -> Retrieval quality benchmark).
+src/eval/retrieval_gold.json text eol=lf
+src/eval/corpora/** text eol=lf

@@ -225,3 +225,82 @@ Append new ADRs; never rewrite accepted ones — supersede them.
   - **Streaming is not token-by-token (recorded at close, pre-existing):** with `subgraphs=False` the nested
     specialists' tokens are not emitted, so answers arrive as one completed response. Documented (README, `chat.py`
     docstring) and kept in the backlog (MED); not changed in Phase 05.
+
+## ADR-015 — Retrieval is measured before it is changed; Phase 06 keeps production retrieval as-is
+2026-11-02 · Accepted (Phase 06; owner decisions after the Stage 1 baseline)
+- **Context:**
+  - The only earlier retrieval evidence (`src/eval/retrieval_eval_report.md`) had n = 3 on one NCERT chapter. Its
+    keyword-coverage labels measure the same signal as the lexical arm, so it favoured the RRF re-order by
+    construction.
+  - Verified from source: with default settings the lexical/RRF step re-orders the **same** k dense candidates, so
+    it cannot change Recall@k. The mentor KB search (`mentor_kb.search_kb`) is dense only (k=4, threshold 0.25). The
+    other vector workflows use `similarity_search*` (k=5, or 8 for PYQ; threshold 0.3).
+- **Decision (measurement method):**
+  - Retrieval quality is judged with evidence-span labels: a chunk is relevant if it contains a gold quote, not if
+    keywords overlap. Metrics are Recall@k, MRR, NDCG@10 and threshold rates, with paired query-level 95% bootstrap
+    CIs.
+  - Variants are compared on one dense candidate pool per query, so re-ordering the same candidates and fetching a
+    larger candidate set stay distinct.
+  - Harness: `scripts/bench_retrieval.py` (isolated embedded Qdrant, embedding cache with a cumulative budget ledger,
+    pacing, dry-run estimate before any request, no LLM calls). Dataset: `src/eval/retrieval_gold.json`. Metrics:
+    `src/eval/retrieval_eval.py`.
+  - Acceptance criteria for any ranking or threshold change are fixed **before** measuring (spec R5).
+- **Baseline (2026-11-02):**
+  - Dataset: 84 answerable + 13 unanswerable queries over four corpora (mentor KB and three synthetic corpora).
+    Questions and 101 evidence quotes were written by Claude and checked by script for verbatim containment in a
+    production chunk only. All entries keep `human_verified: false`.
+  - Embeddings `gemini-embedding-001` @ 768. Production pooled Recall@k 0.988, MRR@k 0.935, NDCG@k 0.938
+    (corrected definition, see the addendum). The Stage 1 historical value was 0.939 under the legacy definition
+    (one quote per rank, capped at 1.0).
+  - Thresholds 0.3 / 0.25 passed every tested result. Top-1 scores are 0.75–0.90, so the no-answer false-positive
+    retrieval rate is 13/13. This is a retrieval finding, not an answer-grounding measurement.
+  - Details and limitations: `docs/ENGINEERING_METRICS.md` → Retrieval quality benchmark.
+- **Decision (production):** no change to thresholds, ranking, the lexical/RRF re-order, k, chunking or indexing.
+  - Over-fetch 2k→k is rejected: Recall@k Δ +0.012, CI [0.000, +0.030].
+  - Routing the mentor KB through RRF is not adopted: MRR Δ +0.079, CI includes 0.
+  - Reranker and BM25 are deferred (headroom 0.006, below the 0.10 trigger).
+  - RRF's ordering signal is noted as promising but did not meet the criteria.
+  - The exploratory 0.80 threshold from a post-hoc sweep is **not** approved. Calibration needs an independent
+    held-out set and explicit owner approval (Backlog).
+- **Consequences:**
+  - Off-topic or unanswerable questions still send k chunks to the model in NCERT / PDF / Lecture / PYQ / Mentor KB.
+    Only the prompt's own instructions guard against answering from them.
+  - Results hold only for these small, partly synthetic corpora with Claude-written queries and exact local search.
+    NCERT, real uploads and production Qdrant remain unmeasured.
+  - The application-side Chroma fallback is unchanged (risk #4 open). Only the benchmark got a preflight error.
+  - The 24 h answer-cache issue (risk #9) is deferred to the Backlog.
+- **Addendum (review remediation, owner-approved S1, S2, Q1–Q6; 2026-11-02):**
+  - Harness corrections:
+    - Each workflow is checked against its real production function: `similarity_search` for PDF / Lecture / PYQ,
+      `similarity_search_with_sources` for NCERT, `search_kb` for the mentor KB.
+    - All rankings come from one verified dense pool; the k and 2k searches are checked equal to the pool prefixes.
+    - Over-fetch is compared with same-k RRF, so its effect is isolated from re-ordering.
+    - The mentor KB and the shared pipeline are reported separately.
+    - Pooled "@k" is labelled as a mean over k = 4 / 5 / 8, and headroom is computed at each corpus's production k.
+    - NDCG uses the achievable ideal (real chunks). The Stage 1 definition stays available as `ndcg_legacy`.
+    - Exit codes 3–7 are tested, and a test shows the consistency check fails on a tampered production function.
+  - Runner safety:
+    - Corpus paths are limited to `src/eval/corpora/` and `data/mentor_kb/` (resolved with symlinks and junctions
+      followed, then checked for containment; secret/config files
+      and `data/ncert/` refused) and are checked before any read.
+    - Cleanup of the temp Qdrant dir is attempted after the client closes, on normal completion and on handled
+      exceptions. A hard process kill can leave temporary files behind.
+    - The new `--cache-only` mode never calls the API.
+  - Corrected cache-only re-run (0 API requests): Recall / MRR and threshold findings unchanged.
+    - Isolated over-fetch: no significant gain (Recall@k +0.012, CI [0.000, +0.030]; NDCG@k +0.007, CI
+      [0.000, +0.017]).
+    - The Stage 1 pooled "over-fetch NDCG +0.031 (marginal)" came from the mentor KB's RRF re-order.
+    - Pooled RRF re-order NDCG@k +0.030, CI [+0.0004, +0.062], still marginal; not significant within the mentor KB
+      or the shared pipeline alone.
+    - Headroom at production k: pooled 0.012, mentor KB 0.028.
+  - **No decision in this ADR changes.** The Stage 1 numbers stay recorded as prior evidence in
+    `docs/ENGINEERING_METRICS.md`.
+  - **Final remediation (owner-approved SF-1, S-1, S-2, doc accuracy, LF protection; 2026-11-02):**
+    - Every mentor-KB file the topper-ingest script opens, and every file hashed for the report, is now validated
+      individually (resolved, contained in `data/mentor_kb/`, policy-checked) before it is read.
+    - The offline network guard patches `socket.socket.connect` only. It is not a complete network sandbox; the
+      guarantee that cache-only sends nothing rests on never creating the provider client and blanking the key.
+    - Hard links cannot be detected by path resolution.
+    - `.gitattributes` keeps LF for `src/eval/retrieval_gold.json` and `src/eval/corpora/**` only, so the recorded
+      hashes and chunking reproduce on Windows checkouts.
+    - No measurement or decision changed.
