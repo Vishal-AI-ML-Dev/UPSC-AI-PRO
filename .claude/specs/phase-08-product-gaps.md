@@ -1,7 +1,9 @@
 # Phase 08 — Product persistence & gaps
 
-Status: APPROVED (revision 4, 2026-11-03) — slices **A → B → C1 → C2**, each implemented, verified, reviewed and
-reported separately; the owner approves each slice before it starts. Slice D deferred.
+Status: **COMPLETE / OFFICIALLY CLOSED (2026-11-04)** — approved as revision 4 on 2026-11-03; slices **A → B → C1 → C2**
+(with Amendments A-1, B-1, C2-1) were each implemented, verified, reviewed and reported separately and are all CLOSED;
+released to production (owner-reported; see `docs/PROJECT_STATE.md` and `docs/phase-reports/phase-08-release-preflight.md`
+§F). Slice D remains deferred. The specification and acceptance criteria below are preserved unchanged.
 Owner: Vishal-AI-ML-Dev  ·  Created: 2026-11-03 (stub renumbered from 07)  ·  Related audit sections: K, Q, R; risk #11
 Plan: `.claude/plans/phase-08-product-gaps.md`  ·  Decision: ADR-017 (`docs/DECISIONS.md`)
 

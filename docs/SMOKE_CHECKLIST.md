@@ -43,3 +43,10 @@ Use a throwaway verified account, in this order. Logs must show `Store: Postgres
 4. Isolation: with a second user's token, `GET /planner/plan` and `GET /progress/overview` show only that user's data.
 5. Supabase Data API: an `anon` / `authenticated` request for `study_plans` or `evaluation_attempts` is refused
    (see `docs/phase-reports/phase-08-release-preflight.md`, section A).
+
+## Release log (kept for future releases; the checklist above is unchanged)
+| Release | Result | Evidence quality |
+|---|---|---|
+| Phase 08 (commits `f355d43`, `497e682`; production Alembic revision `0006_evaluation_attempts`), 2026-11-04 | **All eight workflows reported passed in the production smoke test** by the owner. | **Owner-reported only.** Per-workflow results, the run date and the deployed Render commit SHA were not recorded. Claude did not run or observe it, and no automated production smoke exists: the CI "live deploy smoke test" job was **skipped**, not passed. The "Phase 08 persistence checks" above and the production SQL checks (`docs/phase-reports/phase-08-release-preflight.md` §E / §F) were reported satisfied by the owner without recorded output. No pre-deployment backup was taken (owner waived). |
+
+When a release is smoke-tested, add a row here with the date, who ran it and where the results are kept.

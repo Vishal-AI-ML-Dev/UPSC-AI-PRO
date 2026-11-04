@@ -1,6 +1,6 @@
 # Plan — Phase 08 Product persistence & gaps
 
-Spec: `.claude/specs/phase-08-product-gaps.md` (APPROVED, rev 4)  ·  Status: APPROVED (2026-11-03)  ·  ADR-017
+Spec: `.claude/specs/phase-08-product-gaps.md` (COMPLETE, rev 4)  ·  Status: **COMPLETE (2026-11-04)** — approved 2026-11-03; all slices executed and closed, released to production (owner-reported). The plan below is preserved unchanged as history  ·  ADR-017
 Sequence: **A → B → C1 → C2**. The owner approves each slice before it starts. Each slice ends with
 verification, review and a slice report (`docs/phase-reports/phase-08-slice-<x>-report.md`), then the work stops.
 Hard limits for every slice: Claude does not run Alembic, write to production, call live LLMs or deploy, and does

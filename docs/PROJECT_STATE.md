@@ -14,7 +14,7 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | 05 | Agent architecture truthfulness | DONE (2026-11-02) — `docs/phase-reports/phase-05-report.md` |
 | 06 | RAG quality — `.claude/specs/phase-06-rag-quality.md` | DONE (2026-11-03) — measurement + documentation; no production retrieval change (ADR-015) — `docs/phase-reports/phase-06-report.md` |
 | 07 | LLM evaluation, safety & quality — `.claude/specs/phase-07-llm-eval-safety.md` | DONE (2026-11-03) — offline T1/T2 evals + prompt fencing fixes F0–F7 + budget-gated live harness; T3 live NOT RUN (bounds unvalidated, AC12 open by design; ADR-016) — `docs/phase-reports/phase-07-report.md` |
-| 08 | Product persistence & gaps — `.claude/specs/phase-08-product-gaps.md` (APPROVED rev 4) + `.claude/plans/phase-08-product-gaps.md` | **COMPLETE (2026-11-04)** — all slices **A (+ A-1), B (+ B-1), C1, C2 CLOSED**; migrations 0005 / 0006 written but **never executed against production or any real DB** (owner deploy steps UNVERIFIED); spec/plan APPROVED, ADR-017; slices A → B → C1 → C2, each approved separately; **Slice A + Amendment A-1 CLOSED (2026-11-03)** — verified offline, code-quality review findings S1 / NIT 1 / NIT 2 fixed, final review no BLOCKER / SHOULD-FIX, owner manual browser checks all PASS — `docs/phase-reports/phase-08-slice-a-report.md`; separate frontend polish: 17 literal Unicode-escape UI fixes (browser-verified); **Slice B CLOSED (2026-11-03)** — migration 0005 written (never run by Claude against a real DB), 4 `/planner/plan` endpoints, atomic upsert, Planner reconciliation + unsaved-draft preservation (Amendment B-1); full suite `1642 passed, 2 skipped`, closure focused gates `181 passed`; security review no CRIT/HIGH/MED (LOW #1 fixed); code-quality S1/S2 fixed; all 9 owner browser checks PASS — `docs/phase-reports/phase-08-slice-b-report.md`; **Slice C1 CLOSED (2026-11-04)** — 6 owner-confirmed browser checks PASS (isolated env; check 2 + DB row independently verified); migration 0006 `evaluation_attempts` (never run by Claude against a real DB), optional allow-listed subject on Basic/Mains, best-effort recording; full suite `1706 passed, 2 skipped`; security review no CRIT/HIGH/MED; code-quality no BLOCKER/SHOULD-FIX — `docs/phase-reports/phase-08-slice-c1-report.md`; **Slice C2 CLOSED (2026-11-04)** — no migration; Average Evaluation Score, subject mastery, weak subjects, subject-based revision on `/progress/overview` (additive), Dashboard cards/chart/lists, Planner autofill = weak subjects first then profile `weak_areas` (Amendment C2-1); full suite `1765 passed, 2 skipped`, focused `162 passed`; security review no CRIT/HIGH/MED (LOW rollback fixed); code-quality no BLOCKER/SHOULD-FIX; all 8 owner browser checks PASS (isolated env; check 6 independently verified, check 8 browser request not captured) — `docs/phase-reports/phase-08-slice-c2-report.md` |
+| 08 | Product persistence & gaps — `.claude/specs/phase-08-product-gaps.md` (APPROVED rev 4) + `.claude/plans/phase-08-product-gaps.md` | **OFFICIALLY CLOSED / COMPLETE (2026-11-04)** — all slices **A (+ A-1), B (+ B-1), C1, C2 CLOSED**; **released to production (owner-reported; Alembic revision `0006_evaluation_attempts` owner-confirmed on Supabase)**: release commit `f355d43`, follow-up fix `497e682`; migrations 0005 / 0006 ran only on throwaway SQLite and disposable PostgreSQL 15.19 / 17.11 staging before that; the pre-deployment backup was NOT taken (owner waived it); spec/plan COMPLETE, ADR-017 / ADR-018 / ADR-019; slices A → B → C1 → C2, each approved separately; **Slice A + Amendment A-1 CLOSED (2026-11-03)** — verified offline, code-quality review findings S1 / NIT 1 / NIT 2 fixed, final review no BLOCKER / SHOULD-FIX, owner manual browser checks all PASS — `docs/phase-reports/phase-08-slice-a-report.md`; separate frontend polish: 17 literal Unicode-escape UI fixes (browser-verified); **Slice B CLOSED (2026-11-03)** — migration 0005 written (never run by Claude against a real DB), 4 `/planner/plan` endpoints, atomic upsert, Planner reconciliation + unsaved-draft preservation (Amendment B-1); full suite `1642 passed, 2 skipped`, closure focused gates `181 passed`; security review no CRIT/HIGH/MED (LOW #1 fixed); code-quality S1/S2 fixed; all 9 owner browser checks PASS — `docs/phase-reports/phase-08-slice-b-report.md`; **Slice C1 CLOSED (2026-11-04)** — 6 owner-confirmed browser checks PASS (isolated env; check 2 + DB row independently verified); migration 0006 `evaluation_attempts` (never run by Claude against a real DB), optional allow-listed subject on Basic/Mains, best-effort recording; full suite `1706 passed, 2 skipped`; security review no CRIT/HIGH/MED; code-quality no BLOCKER/SHOULD-FIX — `docs/phase-reports/phase-08-slice-c1-report.md`; **Slice C2 CLOSED (2026-11-04)** — no migration; Average Evaluation Score, subject mastery, weak subjects, subject-based revision on `/progress/overview` (additive), Dashboard cards/chart/lists, Planner autofill = weak subjects first then profile `weak_areas` (Amendment C2-1); full suite `1765 passed, 2 skipped`, focused `162 passed`; security review no CRIT/HIGH/MED (LOW rollback fixed); code-quality no BLOCKER/SHOULD-FIX; all 8 owner browser checks PASS (isolated env; check 6 independently verified, check 8 browser request not captured) — `docs/phase-reports/phase-08-slice-c2-report.md` |
 | 09 | Operations — `.claude/specs/phase-09-operations.md` | STUB — **NOT STARTED** (needs explicit owner approval) |
 
 ## The 8 workflows (must not regress)
@@ -85,8 +85,9 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 | 15 | Dead/duplicate code; unused deps/settings | LOW | 09 (kept per ADR-006) |
 | 16 | Non-blocking CI lint; no frontend tests; live smoke disabled | LOW | 09 |
 | 17 | Compose: unpinned qdrant, default creds, exposed ports, unused redis | LOW | 09 |
-| 18 | ~~Supabase grants / RLS for the new tables~~ CLOSED in code (ADR-019): migrations 0005 / 0006 enable RLS (no policies) and revoke the API roles; verified on PostgreSQL 15.19 / 17.11 staging. The owner confirmed RLS is already on for all 14 existing public tables. Open: the first run on real Supabase (post-deploy SQL checks, `docs/phase-reports/phase-08-release-preflight.md` §E) | MED | at first deploy |
-| 19 | Release/rollback: an image with migration 0006 applies it at boot; an older image cannot boot against a newer revision; downgrade is destructive; dashboard "Rollback" would fail. Runbook: preflight §B–C | MED | before first deploy |
+| 18 | ~~Supabase grants / RLS for the new tables~~ CLOSED in code (ADR-019): migrations 0005 / 0006 enable RLS (no policies) and revoke the API roles; verified on PostgreSQL 15.19 / 17.11 staging. The owner confirmed RLS is already on for all 14 existing public tables. Production confirmed by the owner (not independently verified): RLS enabled on both tables and SELECT denied to `anon` / `authenticated` / `service_role`; see `docs/phase-reports/phase-08-release-preflight.md` §F | CLOSED | 2026-11-04 |
+| 19 | Release/rollback: an image with migration 0006 applies it at boot; an older image cannot boot against a newer revision; downgrade is destructive; dashboard "Rollback" would fail. **RELEASED 2026-11-04 as one combined deploy (owner-reported; revision `0006_evaluation_attempts` owner-confirmed)**; the rollback rule stands: forward-fix. Runbook: preflight §B–C | MED | standing |
+| 20 | **No pre-deployment backup**: the owner waived it, so there is no restore point that predates migrations 0005 / 0006 in production. Recovery from a bad migration or data loss would rely on forward-fix and whatever backups the Supabase plan provides independently (not verified) | MED (accepted by the owner) | standing |
 
 ## Doc drift (README.md / ARCHITECTURE.md claims contradicted by source) — RESOLVED in Phase 01 (2026-11-02)
 All items below were corrected in place; claim → evidence table in `docs/phase-reports/phase-01-report.md`.
@@ -505,7 +506,46 @@ All items below were corrected in place; claim → evidence table in `docs/phase
   generation rely only on the global per-IP limiter — LOW.
 - (Slice C2) Revision `next_due` / `due` use UTC dates (like the UTC streak item above) — LOW.
 
-### Last handoff — 2026-11-04 (Phase 08 FINAL RELEASE prepared; deployment is the owner's manual step)
+### Last handoff — 2026-11-04 (Phase 08 OFFICIALLY CLOSED; released to production)
+- **Phase 08 — OFFICIALLY CLOSED / COMPLETE.** Slices A (+ A-1), B (+ B-1), C1 and C2 are CLOSED (reports
+  `docs/phase-reports/phase-08-slice-{a,b,c1,c2}-report.md`, unchanged). **Phase 09 — NOT STARTED.** No Phase 08 work
+  remains. **Next project action: Phase 09 planning, only when the owner explicitly authorizes it**
+  (`.claude/specs/phase-09-operations.md` is still a stub). This closure changed documentation only.
+- Evidence is kept in three tiers; do not merge them:
+  1. **Git, verified from the repository (2026-11-04):** `f355d43` "feat: complete Phase 08 product persistence and
+     release hardening" and `497e682` "fix: reject symlink escapes in retrieval benchmark" are on `origin/main`
+     (local `HEAD` = remote `main` = `497e682af8f1dbb626d4311fe3472088df4d6567`, working tree clean).
+  2. **Automated CI (owner-reported GitHub Actions results):** `f355d43` failed with `1778 passed, 1 skipped, 1 failed`;
+     the failing test was `tests/test_bench_retrieval.py::test_mentor_kb_rejects_a_linked_directory_escape` (Phase 06
+     benchmark tooling, not Phase 08 code and not the application runtime): on Linux / Python 3.13 `Path.rglob` no longer
+     expands `**` through a symlinked directory, so `_corpus_hashes` skipped a linked folder instead of rejecting it
+     (fixed in `497e682` with `_markdown_files_below` and 4 regression tests; local check in a Linux / Python 3.13
+     container: `tests/test_bench_retrieval.py` 54 passed). CI for `497e682`: **3 successful checks and 2 skipped**. The
+     named successes are the Frontend build and the Offline quality gate; the third successful check is not named in
+     the available evidence. **Skipped, NOT passed:** the live LLM-as-judge faithfulness gate and the live deploy smoke
+     test; they provide no evidence.
+  3. **Isolated staging (not Supabase):** disposable PostgreSQL 15.19 and 17.11, final report **236 checks passed, 0
+     failed** (ADR-018 / ADR-019, `docs/phase-reports/phase-08-release-preflight.md` section E); focused migration tests
+     `17 passed`; focused set `269 passed`; ruff, compileall and `git diff --check` clean. The last FULL local suite run
+     was `1765 passed, 2 skipped` (before the release hardening).
+- **Production, owner-reported / owner-confirmed (not independently verified by Claude):** Vercel deployment completed;
+  Render deployment completed (the deployed commit SHA is not recorded in the available evidence, so it is
+  owner-reported / unconfirmed); production Supabase Alembic revision `0006_evaluation_attempts`; RLS enabled on
+  `study_plans` and `evaluation_attempts`; SELECT denied to `anon`, `authenticated` and `service_role` on both; existing
+  public application tables reported RLS-enabled; the eight-workflow production smoke test reported passed. Per-workflow
+  results and deployment timestamps are not recorded in the repository.
+- **Backup: NOT TAKEN.** The owner explicitly waived the pre-deployment backup. There is no restore point that predates
+  migrations 0005 / 0006; rollback is forward-fix only, and a downgrade would destroy plan and attempt data.
+- **Outstanding limitations (keep visible):**
+  - No production p50 / p95, real-user metrics or live LLM quality were measured (T3 live evals never run, ADR-016).
+  - The two skipped CI jobs have never been shown to pass for this release.
+  - Existing public tables keep their API-role grants (deliberately unchanged); RLS protects them from `anon` /
+    `authenticated`, while `service_role` bypasses RLS (Supabase documentation).
+  - Whether the Supabase Data API exposes the `public` schema was never recorded; the nightly CI job receives a
+    `DATABASE_URL` secret whose target is unknown (LOW).
+  - Old uploads and pasted lectures must be re-uploaded (ADR-007). All LOW / INFO backlog items below stay open.
+
+### Earlier handoff — 2026-11-04 (Phase 08 FINAL RELEASE prepared; deployment was the owner's manual step)
 - Phase 08 stays **COMPLETE** (slices A + A-1, B + B-1, C1, C2 CLOSED). **Phase 09 NOT STARTED.** Render Auto-Deploy is
   **OFF**: pushing to `main` deploys nothing; the owner clicks Manual Deploy. Deployment is NOT done and NOT verified.
 - Table security (ADR-019): migrations 0005 and 0006 (never deployed, so edited in place) enable RLS with **no policies**

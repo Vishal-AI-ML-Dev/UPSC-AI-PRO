@@ -516,6 +516,9 @@ ADR-003)
     image runs every pending migration at boot (`Dockerfile:74`, `init_db()`), so any image that contains
     `0006_evaluation_attempts.py` applies it. The recommended path is ONE combined release of 0005 + 0006 with a
     single backup beforehand, not two deploys. The original text above is kept as history.
+  - **Outcome (2026-11-04, owner-reported):** shipped as ONE combined release (commits `f355d43`, `497e682`); production
+    reached `0006_evaluation_attempts` (owner-confirmed). The recommended single backup was **not taken** (owner waived).
+    See `docs/phase-reports/phase-08-release-preflight.md` section F.
   - Claude writes the migration files but never runs Alembic or writes to production.
   - Plan history, Slice D (history delete / pagination, "my documents"), server-side Mentor history and
     persistent cost counters stay in the backlog.
@@ -564,6 +567,10 @@ ADR-003)
   - Staging requirement before the first production deploy: rerun the disposable-PostgreSQL verification (both
     versions) against the exact commit being deployed. The runner script is kept outside the repository (scratchpad);
     adding it under `scripts/` needs owner approval.
+- **Outcome (2026-11-04):** released as part of `f355d43`; production revision `0006_evaluation_attempts` is
+  owner-confirmed. Whether any concurrent container start occurred in production, and therefore whether the lock acted
+  there, is not recorded. The 85-check staging figure above is the earlier run; the final staging total after ADR-019
+  is 236 checks, 0 failed (release preflight section E).
 
 ## ADR-019 — Backend-only Phase 08 tables are locked down inside their own migrations (RLS on, no API-role privileges)
 2026-11-04 · Accepted (owner-authorized final release preparation; not a reopening of any slice, not Phase 09)
@@ -598,3 +605,8 @@ ADR-003)
   - A future backend-only table needs the same two statements in its own migration (this is a convention, not enforced).
   - The release is ONE combined deploy of 0005 + 0006 (ADR-017 sequencing is superseded, see ADR-018); the rollback
     preference is forward-fix, because an older image cannot boot against a newer Alembic revision.
+- **Outcome (2026-11-04, owner-confirmed on production, not independently verified):** RLS is enabled on `study_plans`
+  and `evaluation_attempts`, and SELECT is denied to `anon`, `authenticated` and `service_role` on both. Existing public
+  tables were reported RLS-enabled; their grants were left unchanged on purpose. Note that `service_role` bypasses RLS
+  (Supabase documentation), so the revoke is what protects the two new tables from it. See the release preflight
+  section F.

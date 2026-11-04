@@ -5,7 +5,9 @@ inside the two never-deployed migrations (ADR-019) and verified on disposable Po
 The advisory-lock code (ADR-018, `migrations/env.py`) is unchanged. Nothing in this document was executed against
 Supabase or any production system. Sections A–D keep the original review (the A10 proposals P1 / P2 are superseded by
 the migrations, see the status table); section E records the final staging results. This is the release handoff
-reference; the owner still performs the backup and clicks Manual Deploy.
+reference; at the time of writing the owner still had to take the backup and click Manual Deploy. **Closure update:** the release
+then happened, and its outcome (including that the backup was NOT taken) is recorded in section F; sections 0 to E are kept as
+the pre-release record.
 
 Labels used below: **CONFIRMED** (read from the code, run in this session, or supplied by the owner) ·
 **ASSUMPTION** (reasonable but not verified here) · **UNRESOLVED** (needs an owner decision or owner-run check).
@@ -16,7 +18,7 @@ Labels used below: **CONFIRMED** (read from the code, run in this session, or su
 | B1 | New tables would be born with `arwdDxtm` for `anon` / `authenticated` / `service_role`. | **RESOLVED in code (ADR-019):** migrations 0005 and 0006 enable RLS (no policies) and revoke all privileges from the three roles in the same transaction as `CREATE TABLE`; roles that do not exist are skipped. Verified in staging (section E). Global default privileges are deliberately untouched. |
 | B2 | Role used by the app / migrations. | **CONFIRMED by the owner:** the existing public application tables are owned by `postgres`. Staging proves owner access with a non-superuser, non-BYPASSRLS owner. Q3 / Q4 remain available as a cross-check. |
 | B3 | State of the EXISTING tables. | **CONFIRMED by the owner:** RLS is enabled on all 14 currently listed public tables (including `alembic_version`), `force_rls` false. Their grants and policies are intentionally not changed by this release; existing API-role grants still appear in privilege checks and RLS is what protects them. The earlier "potentially critical" concern is therefore not confirmed. |
-| B4 | Backup. | **OPEN — owner action before clicking Deploy:** take and verify a Supabase backup / `pg_dump` (section C). |
+| B4 | Backup. | **NOT TAKEN — the owner explicitly waived the pre-deployment backup** (section F). It was OPEN at the time this table was written. |
 | D1 | One combined release of 0005 + 0006. | Recorded as the release path (section B, ADR-017 amendment, ADR-018). |
 | N1 | Nightly CI `llm-eval` receives `secrets.DATABASE_URL` (`.github/workflows/ci.yml:83`); eval modules never call `init_db()` / Alembic. | LOW / owner to confirm the secret is not production. |
 | N2 | The push also releases Phases 00–07 (no migrations beyond 0004). Old uploads / pasted lectures must be re-uploaded (ADR-007). | Awareness. |
@@ -363,3 +365,54 @@ select c.relname, coalesce(r.rolname,'PUBLIC') as grantee, a.privilege_type
 select tablename, policyname from pg_policies
  where schemaname = 'public' and tablename in ('study_plans','evaluation_attempts');      -- expect no rows
 ```
+
+## F. Final production release and closure (2026-11-04)
+This section records what happened after the release commit. Three kinds of evidence are kept apart. Nothing in the
+production tier was verified by Claude: it comes from the owner's reports and SQL results, and no production system was
+accessed during this documentation. Deployment timestamps and per-workflow smoke results were not recorded.
+
+**1. Git (verified from the repository)**
+- Release commit `f355d43` — "feat: complete Phase 08 product persistence and release hardening" (46 files).
+- Follow-up fix `497e682` — "fix: reject symlink escapes in retrieval benchmark" (`scripts/bench_retrieval.py`,
+  `tests/test_bench_retrieval.py`).
+- Local `HEAD` = remote `origin/main` = `497e682af8f1dbb626d4311fe3472088df4d6567`; working tree clean at closure.
+
+**2. Automated CI (owner-reported GitHub Actions results)**
+- `f355d43`: failed — `1778 passed, 1 skipped, 1 failed`. The failure was
+  `tests/test_bench_retrieval.py::test_mentor_kb_rejects_a_linked_directory_escape`. Cause: on Linux / Python 3.13
+  `Path.rglob` no longer expands `**` through a symlinked directory, so `_corpus_hashes` silently skipped a linked folder
+  instead of rejecting it (the file was never read, so no disclosure; it is Phase 06 benchmark tooling, not Phase 08 code
+  and not the application runtime). Fixed in `497e682`; the test itself was not weakened.
+- `497e682`: **3 successful checks and 2 skipped checks.** Successful and named: Frontend build, Offline quality gate; the
+  third successful check is not named in the available evidence. **Skipped, NOT passed: the live LLM-as-judge
+  faithfulness gate and the live deploy smoke test.** They are evidence of nothing.
+
+**3. Isolated staging (disposable PostgreSQL, not Supabase)** — see section E: 15.19 and 17.11, 236 checks passed, 0
+failed; focused migration tests `17 passed`; focused set `269 passed`; ruff, compileall and `git diff --check` clean. The
+last full local suite run was `1765 passed, 2 skipped` (before the release hardening). For `497e682` the local check was
+`tests/test_bench_retrieval.py` 54 passed in a Linux / Python 3.13 container (52 passed, 2 skipped on Windows).
+
+**4. Production (owner-reported / owner-confirmed)**
+| Item | Status |
+|---|---|
+| Vercel deployment (frontend) | Completed (owner-reported). |
+| Render deployment (backend) | Completed (owner-reported). The deployed commit SHA is **not recorded** in the available evidence: owner-reported / unconfirmed. |
+| Alembic revision on production Supabase | **`0006_evaluation_attempts`** (owner-confirmed with the SQL check from section E). |
+| `study_plans` | RLS enabled (owner-confirmed). |
+| `evaluation_attempts` | RLS enabled (owner-confirmed). |
+| SELECT as `anon`, `authenticated`, `service_role` on both tables | Denied (owner-confirmed). |
+| Existing public application tables | RLS reported enabled (owner-reported); their grants were deliberately left unchanged. |
+| Eight-workflow production smoke test | Reported passed (owner-reported); individual results and the date were not recorded. |
+| **Pre-deployment backup** | **NOT TAKEN — owner waived.** There is no restore point that predates migrations 0005 / 0006. |
+
+**Limitations that remain visible**
+- Rollback is forward-fix only; a downgrade would destroy `study_plans` / `evaluation_attempts` data and there is no backup
+  to restore from (section C still applies).
+- No production p50 / p95, real-user metrics or live LLM quality were measured.
+- The two skipped CI jobs have not been shown to pass for this release.
+- Existing public tables keep their API-role grants; RLS protects them from `anon` / `authenticated`, while `service_role`
+  bypasses RLS (Supabase documentation). This is an owner decision and was not changed.
+- Not recorded: whether the Data API exposes the `public` schema, what the nightly CI `DATABASE_URL` secret points at, and
+  whether any concurrent container start occurred (so whether the advisory lock acted in production is unknown).
+
+**Closure:** Phase 08 is OFFICIALLY CLOSED / COMPLETE. Phase 09 is NOT STARTED and needs the owner's explicit authorization.
