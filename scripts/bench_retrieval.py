@@ -93,6 +93,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fnmatch
 import hashlib
 import importlib.util
 import io
@@ -1110,6 +1111,28 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _markdown_files_below(base: Path) -> list[Path]:
+    """Every ``*.md`` below ``base``, including files reached THROUGH directory links.
+
+    ``Path.rglob`` does not expand ``**`` through a symlinked directory since Python 3.13 (a
+    Windows junction is still followed), so a link such as ``toppers -> /elsewhere`` was skipped
+    silently on Linux instead of reaching ``mentor_kb_file`` and being rejected. Walking with
+    ``followlinks=True`` lists those files under their in-tree names so the caller validates
+    each one: an escaping link is refused, a link that stays inside the root is accepted. A
+    directory already visited (by real path) is not entered again, which also cuts link cycles.
+    """
+    found: list[Path] = []
+    visited: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=True):
+        real = os.path.realpath(dirpath)
+        if real in visited:
+            dirnames[:] = []
+            continue
+        visited.add(real)
+        found.extend(Path(dirpath, n) for n in filenames if fnmatch.fnmatch(n, "*.md"))
+    return sorted(found)
+
+
 def _corpus_hashes(dataset: dict) -> dict[str, str]:
     out = {}
     for name, spec in active_corpora(dataset).items():
@@ -1117,7 +1140,7 @@ def _corpus_hashes(dataset: dict) -> dict[str, str]:
             h = hashlib.sha256()
             resolve_corpus_path(spec["path"], allow_dir=True)
             # Review SF-1: validate each file before reading it (no link escapes).
-            for p in sorted((REPO_ROOT / spec["path"]).rglob("*.md")):
+            for p in _markdown_files_below(REPO_ROOT / spec["path"]):
                 h.update(mentor_kb_file(p).read_bytes())
             out[name] = h.hexdigest()
         elif "path" in spec:

@@ -887,6 +887,59 @@ def test_mentor_kb_rejects_a_linked_directory_escape(mentor_repo):
         bench._corpus_hashes(_kb_dataset())
 
 
+def test_mentor_kb_listing_reaches_files_behind_a_directory_link(mentor_repo):
+    # Regression (CI, Linux / Python 3.13): Path.rglob no longer expands "**" through a
+    # symlinked directory, so a linked folder was skipped silently instead of validated.
+    repo, outside = mentor_repo
+    toppers = repo / "data" / "mentor_kb" / "toppers"
+    shutil.rmtree(toppers)
+    try:
+        _link_dir(toppers, outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory links not available here: {exc}")
+    names = [p.name for p in bench._markdown_files_below(repo / "data" / "mentor_kb")]
+    assert "leak.md" in names  # listed (then rejected by mentor_kb_file), never skipped
+    assert "upsc_facts.md" in names
+
+
+def test_mentor_kb_nested_directory_link_escape_is_rejected(mentor_repo):
+    repo, outside = mentor_repo
+    nested = repo / "data" / "mentor_kb" / "toppers" / "nested"
+    try:
+        _link_dir(nested, outside)  # a link one level below a real folder
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory links not available here: {exc}")
+    with pytest.raises(bench.CorpusPathError, match="outside the approved roots"):
+        bench._corpus_hashes(_kb_dataset())
+
+
+def test_mentor_kb_directory_link_inside_the_root_is_still_accepted(mentor_repo):
+    repo, _ = mentor_repo
+    kb = repo / "data" / "mentor_kb"
+    extra = kb / "extra"
+    extra.mkdir()
+    (extra / "in-root.md").write_text("inside the root", encoding="utf-8")
+    try:
+        _link_dir(kb / "toppers" / "alias", extra)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory links not available here: {exc}")
+    digest = bench._corpus_hashes(_kb_dataset())["kb"]  # legitimate in-root link: no error
+    assert len(digest) == 64
+    assert "in-root.md" in [p.name for p in bench._markdown_files_below(kb)]
+
+
+def test_mentor_kb_directory_link_cycle_terminates(mentor_repo):
+    repo, _ = mentor_repo
+    kb = repo / "data" / "mentor_kb"
+    try:
+        _link_dir(kb / "toppers" / "loop", kb)  # link back to an ancestor
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory links not available here: {exc}")
+    names = [p.name for p in bench._markdown_files_below(kb)]
+    assert names.count("upsc_facts.md") == 1  # each real directory is walked once
+    assert len(bench._corpus_hashes(_kb_dataset())["kb"]) == 64
+
+
 def test_mentor_kb_rejects_a_file_symlink_escape(mentor_repo):
     repo, outside = mentor_repo
     link = repo / "data" / "mentor_kb" / "toppers" / "zz-link.md"
