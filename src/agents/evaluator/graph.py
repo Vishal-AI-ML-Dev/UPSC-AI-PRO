@@ -8,6 +8,7 @@ import re
 from src.agents.evaluator.prompts import EVALUATOR_PROMPT, MAINS_EVAL_PROMPT, MAINS_MODEL_PROMPT
 from src.core.llm import describe_exception, get_llm, message_text
 from src.core.prompt_safety import harden_untrusted
+from src.core.stream_notices import stream_notice
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ def evaluate_answer(question: str, answer: str):
     except Exception as e:
         # Class/status/location only - never the provider message or the text.
         logger.error("Evaluation failed: %s", describe_exception(e), extra={"safe_summary": True})
-        yield "⚠️ Evaluation failed. Please try again."
+        yield stream_notice("Evaluation failed. Please try again.")
 
 
 # ─────────────────────────────────────────
@@ -176,7 +177,7 @@ def evaluate_mains(
         logger.error(
             "Mains evaluation failed: %s", describe_exception(e), extra={"safe_summary": True}
         )
-        yield "⚠️ Evaluation failed. Please try again."
+        yield stream_notice("Evaluation failed. Please try again.")
 
 
 # ─────────────────────────────────────────
@@ -227,7 +228,7 @@ def get_model_answer(
             describe_exception(e),
             extra={"safe_summary": True},
         )
-        yield "⚠️ Could not generate model answer. Please try again."
+        yield stream_notice("Could not generate model answer. Please try again.")
 
 
 def parse_score(evaluation: str) -> int | None:

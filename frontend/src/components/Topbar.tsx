@@ -65,8 +65,8 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Ask the Mentor anything\u2026 (press Enter)"
-            title="Type a question and press Enter \u2014 the AI Mentor will answer it"
+            placeholder="Ask the Mentor anything… (press Enter)"
+            title="Type a question and press Enter — the AI Mentor will answer it"
             className="input w-full pl-9 pr-14"
           />
           <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] text-muted sm:block">

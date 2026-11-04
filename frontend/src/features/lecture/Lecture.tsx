@@ -110,8 +110,8 @@ export function Lecture() {
       <div>
         <h1 className="text-2xl font-extrabold text-fg">Lecture Notes</h1>
         <p className="text-sm text-muted">
-          Turn a YouTube lecture or a pasted transcript into structured notes \u2014
-          then chat with the lecture.
+          Turn a YouTube lecture or a pasted transcript into structured notes — then
+          chat with the lecture.
         </p>
       </div>
 
@@ -153,7 +153,7 @@ export function Lecture() {
                 className="input"
                 value={youtubeUrl}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=\u2026"
+                placeholder="https://www.youtube.com/watch?v=…"
               />
             </div>
 
@@ -189,7 +189,7 @@ export function Lecture() {
                 className="input min-h-[160px] resize-y"
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
-                placeholder="Paste the lecture transcript here\u2026"
+                placeholder="Paste the lecture transcript here…"
               />
             </div>
             <Button
@@ -201,7 +201,7 @@ export function Lecture() {
           </div>
         )}
 
-        {processing && <Spinner label="Summarising the lecture\u2026" />}
+        {processing && <Spinner label="Summarising the lecture…" />}
         {(stage === "queued" || stage === "running") && !error && (
           <p className="text-sm text-muted">
             {stage === "queued"
@@ -262,10 +262,10 @@ export function Lecture() {
                     m.content ? (
                       <Markdown>{m.content}</Markdown>
                     ) : i === messages.length - 1 && streaming ? (
-                      <span className="text-muted">Thinking\u2026</span>
+                      <span className="text-muted">Thinking…</span>
                     ) : (
                       <span className="text-muted">
-                        No response \u2014 please ask again.
+                        No response — please ask again.
                       </span>
                     )
                   ) : (
@@ -278,7 +278,7 @@ export function Lecture() {
           <div className="flex items-end gap-2">
             <textarea
               className="input max-h-40 min-h-[48px] flex-1 resize-y"
-              placeholder="Ask something about this lecture\u2026"
+              placeholder="Ask something about this lecture…"
               value={q}
               rows={1}
               onChange={(e) => setQ(e.target.value)}

@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from "react"
 import { usePersistentState } from "../../lib/usePersistentState"
 import { useSearchParams } from "react-router-dom"
-import { api, streamAgent, type MentorMessage } from "../../lib/api"
+import {
+  api,
+  STREAM_NOTICE_PREFIX,
+  streamAgent,
+  type MentorMessage,
+} from "../../lib/api"
 import { randomId } from "../../lib/randomId"
 import { readScoped, sessionEpoch, writeScoped } from "../../lib/session"
+import { persistExchange } from "./persistExchange"
 import { Markdown } from "../../components/Markdown"
 import { Button } from "../../components/ui"
 import { Feedback } from "../../components/Feedback"
@@ -21,7 +27,14 @@ export function MentorChat() {
   )
   const [input, setInput] = usePersistentState("mentor:input", "")
   const [streaming, setStreaming] = useState(false)
-  const conversationId = useRef<string | null>(null)
+  // Persisted so the next exchange after a reload joins the same saved
+  // conversation in Session History; "New chat" resets it.
+  const [conversationId, setConversationId] = usePersistentState<string | null>(
+    "mentor:conversationId",
+    null,
+  )
+  // Bumped by "New chat" so an in-flight save cannot restore the old conversation.
+  const conversationGen = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [params, setParams] = useSearchParams()
   const bootRef = useRef(false)
@@ -76,28 +89,14 @@ export function MentorChat() {
   }
 
   // Persist the exchange so it appears in Session History. Best-effort only.
-  async function persist(question: string, answer: string) {
-    try {
-      const title = question.length > 60 ? question.slice(0, 57) + "…" : question
-      const saved = await api.saveMessage({
-        role: "user",
-        content: question,
-        agent: "mentor",
-        conversation_id: conversationId.current,
-        title,
-      })
-      conversationId.current = saved.conversation_id
-      if (answer.trim()) {
-        await api.saveMessage({
-          role: "assistant",
-          content: answer,
-          agent: "mentor",
-          conversation_id: conversationId.current,
-        })
-      }
-    } catch {
-      // history persistence is non-critical; ignore failures
-    }
+  function persist(question: string, answer: string) {
+    return persistExchange(question, answer, {
+      save: (input) => api.saveMessage(input),
+      noticePrefix: STREAM_NOTICE_PREFIX,
+      conversationId,
+      generation: conversationGen,
+      setConversationId,
+    })
   }
 
   // Start a fresh conversation: rotate the server-side thread so the new chat
@@ -107,7 +106,8 @@ export function MentorChat() {
     const id = randomId()
     writeScoped("mentor:threadId", id)
     threadId.current = id
-    conversationId.current = null
+    conversationGen.current += 1
+    setConversationId(null)
     setMessages([])
     setInput("")
   }

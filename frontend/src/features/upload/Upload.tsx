@@ -127,15 +127,15 @@ export function Upload() {
             {"\u{1F4C4}"}
           </span>
           {processing ? (
-            <Spinner label="Reading and summarising your PDF\u2026" />
+            <Spinner label="Reading and summarising your PDF…" />
           ) : (
             <>
               <div className="text-base font-semibold text-fg">
                 Drag &amp; drop your PDF here
               </div>
               <div className="text-sm text-muted">
-                or <span className="font-medium text-brand-400">click to browse</span>{" "}
-                \u2014 book chapters, notes or reports
+                or <span className="font-medium text-brand-400">click to browse</span> —
+                book chapters, notes or reports
               </div>
             </>
           )}
@@ -199,7 +199,7 @@ export function Upload() {
                     m.content ? (
                       <Markdown>{m.content}</Markdown>
                     ) : (
-                      <span className="text-muted">Thinking\u2026</span>
+                      <span className="text-muted">Thinking…</span>
                     )
                   ) : (
                     <span className="whitespace-pre-wrap">{m.content}</span>
@@ -211,7 +211,7 @@ export function Upload() {
           <div className="flex items-end gap-2">
             <textarea
               className="input max-h-40 min-h-[48px] flex-1 resize-y"
-              placeholder="Ask something about this document\u2026"
+              placeholder="Ask something about this document…"
               value={q}
               rows={1}
               onChange={(e) => setQ(e.target.value)}

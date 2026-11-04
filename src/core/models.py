@@ -3,7 +3,17 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.db import Base
@@ -146,4 +156,66 @@ class Job(Base):
     )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=True
+    )
+
+
+class StudyPlan(Base):
+    """The caller's latest study plan (Phase 08 Slice B, ADR-017).
+
+    At most one row per user (UNIQUE ``user_id``): saving a new plan replaces
+    the row in place with a new ``id`` and empty progress, so no older plan is
+    retained. ``inputs``, ``meta`` and ``progress`` are JSON stored as Text
+    (like ``jobs.payload``) for SQLite/PostgreSQL parity. Rows are only ever
+    addressed by the authenticated user id (``src/core/study_plans.py``).
+    """
+
+    __tablename__ = "study_plans"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_study_plans_user_id"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    goal: Mapped[str] = mapped_column(String(200), nullable=False)
+    inputs: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_md: Mapped[str] = mapped_column(Text, nullable=False)
+    meta: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class EvaluationAttempt(Base):
+    """One Basic or Mains Answer Evaluator attempt (Phase 08 Slice C1, ADR-017).
+
+    Deliberately holds **no question or answer text** — only who, which mode,
+    the optional allow-listed subject, the validated score (NULL = unscored)
+    and its maximum. Written best-effort by ``src/core/evaluation_history.py``;
+    rows are only ever addressed by the authenticated user id.
+    """
+
+    __tablename__ = "evaluation_attempts"
+    __table_args__ = (
+        Index(
+            "ix_evaluation_attempts_user_subject_created",
+            "user_id",
+            "subject",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    mode: Mapped[str] = mapped_column(String(10), nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
     )

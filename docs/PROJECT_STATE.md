@@ -14,21 +14,23 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | 05 | Agent architecture truthfulness | DONE (2026-11-02) — `docs/phase-reports/phase-05-report.md` |
 | 06 | RAG quality — `.claude/specs/phase-06-rag-quality.md` | DONE (2026-11-03) — measurement + documentation; no production retrieval change (ADR-015) — `docs/phase-reports/phase-06-report.md` |
 | 07 | LLM evaluation, safety & quality — `.claude/specs/phase-07-llm-eval-safety.md` | DONE (2026-11-03) — offline T1/T2 evals + prompt fencing fixes F0–F7 + budget-gated live harness; T3 live NOT RUN (bounds unvalidated, AC12 open by design; ADR-016) — `docs/phase-reports/phase-07-report.md` |
-| 08–09 | See `.claude/specs/README.md` (08 = product gaps, renumbered from 07) | STUB |
+| 08 | Product persistence & gaps — `.claude/specs/phase-08-product-gaps.md` (APPROVED rev 4) + `.claude/plans/phase-08-product-gaps.md` | **COMPLETE (2026-11-04)** — all slices **A (+ A-1), B (+ B-1), C1, C2 CLOSED**; migrations 0005 / 0006 written but **never executed against production or any real DB** (owner deploy steps UNVERIFIED); spec/plan APPROVED, ADR-017; slices A → B → C1 → C2, each approved separately; **Slice A + Amendment A-1 CLOSED (2026-11-03)** — verified offline, code-quality review findings S1 / NIT 1 / NIT 2 fixed, final review no BLOCKER / SHOULD-FIX, owner manual browser checks all PASS — `docs/phase-reports/phase-08-slice-a-report.md`; separate frontend polish: 17 literal Unicode-escape UI fixes (browser-verified); **Slice B CLOSED (2026-11-03)** — migration 0005 written (never run by Claude against a real DB), 4 `/planner/plan` endpoints, atomic upsert, Planner reconciliation + unsaved-draft preservation (Amendment B-1); full suite `1642 passed, 2 skipped`, closure focused gates `181 passed`; security review no CRIT/HIGH/MED (LOW #1 fixed); code-quality S1/S2 fixed; all 9 owner browser checks PASS — `docs/phase-reports/phase-08-slice-b-report.md`; **Slice C1 CLOSED (2026-11-04)** — 6 owner-confirmed browser checks PASS (isolated env; check 2 + DB row independently verified); migration 0006 `evaluation_attempts` (never run by Claude against a real DB), optional allow-listed subject on Basic/Mains, best-effort recording; full suite `1706 passed, 2 skipped`; security review no CRIT/HIGH/MED; code-quality no BLOCKER/SHOULD-FIX — `docs/phase-reports/phase-08-slice-c1-report.md`; **Slice C2 CLOSED (2026-11-04)** — no migration; Average Evaluation Score, subject mastery, weak subjects, subject-based revision on `/progress/overview` (additive), Dashboard cards/chart/lists, Planner autofill = weak subjects first then profile `weak_areas` (Amendment C2-1); full suite `1765 passed, 2 skipped`, focused `162 passed`; security review no CRIT/HIGH/MED (LOW rollback fixed); code-quality no BLOCKER/SHOULD-FIX; all 8 owner browser checks PASS (isolated env; check 6 independently verified, check 8 browser request not captured) — `docs/phase-reports/phase-08-slice-c2-report.md` |
+| 09 | Operations — `.claude/specs/phase-09-operations.md` | STUB — **NOT STARTED** (needs explicit owner approval) |
 
 ## The 8 workflows (must not regress)
 | Workflow | Backend entry | Frontend | Status (last verified) |
 |---|---|---|---|
-| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close); every message routed afresh — the first message's route no longer sticks to the conversation; supervisor has 4 routes, no `rag`; specialists store the question once, mentor history = coherent Q/A pairs; replies never echo the question (Phase 05, ADR-014); answers arrive whole, not token by token (pre-existing, backlog MED); offline smoke PASS 2026-11-02 (Phase 05 close); student profile fenced (Phase 07 F4); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| AI Mentor | `src/api/routes/chat.py` `POST /api/v1/agent/chat/stream` | `features/mentor/MentorChat.tsx` | Code present; runtime UNVERIFIED; KB tool limited to mentor KB (Phase 02); offline smoke PASS 2026-11-02; prompt bounded to current turn + 6 earlier Q/A turns (Phase 03) (Phase 03 close); every message routed afresh — the first message's route no longer sticks to the conversation; supervisor has 4 routes, no `rag`; specialists store the question once, mentor history = coherent Q/A pairs; replies never echo the question (Phase 05, ADR-014); answers arrive whole, not token by token (pre-existing, backlog MED); offline smoke PASS 2026-11-02 (Phase 05 close); student profile fenced (Phase 07 F4); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close); conversation id persisted across reloads ("New chat" race guarded), stream notices incl. specialist failure fallbacks never saved as answers (Phase 08 Slice A + A-1); owner browser checks PASS 2026-11-03 (reload continuity, New Chat, in-flight save race, specialist failures not in Session History) |
 | NCERT Study | `src/api/routes/ncert.py` | `features/ncert/Ncert.tsx` | Code present; needs R2 or local PDFs; runtime UNVERIFIED; input bounds (Phase 02); offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed); study aids fenced (Phase 07 F7); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
 | PYQ + Personal PYQ Bank | `src/api/routes/pyq.py` | `features/pyq/Pyq.tsx` | Code present; runtime UNVERIFIED; PDF validation + cross-user regression test (Phase 02); offline smoke PASS 2026-11-02; parse/bank status/clear off the event loop, bank `sync=true` offloaded (Phase 03); bank upload job: heartbeat lease, deadline, no auto-retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close); bank context + parser input fenced (Phase 07 F1); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
-| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02; `*/sync` endpoints off the event loop (Phase 03) (Phase 03 close); answer/question fenced, parsed score bounded to [0, max] (Phase 07 F5/F6); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
-| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed); eval-only in Phase 07 (no app change); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
-| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; not persisted; offline smoke PASS 2026-11-02; `generate/sync` off the event loop (Phase 03) (Phase 03 close); eval-only in Phase 07 (no app change); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
+| Answer Evaluator | `src/api/routes/evaluator.py` | `features/evaluator/Evaluator.tsx` | Code present; runtime UNVERIFIED; offline smoke PASS 2026-11-02; `*/sync` endpoints off the event loop (Phase 03) (Phase 03 close); answer/question fenced, parsed score bounded to [0, max] (Phase 07 F5/F6); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close); failure fallbacks are stream notices (Phase 08 Slice A-1, text unchanged after the prefix); Basic/Mains attempts recorded with an optional subject (Phase 08 Slice C1, migration 0006) and shown as Dashboard analytics (Slice C2); owner browser checks PASS 2026-11-04 |
+| Current Affairs | `src/api/routes/current_affairs.py` | `features/current_affairs/CurrentAffairs.tsx` | Code present; live web; runtime UNVERIFIED; offline smoke PASS 2026-11-02 (Phase 03 close; only the rate limiter changed); eval-only in Phase 07 (no app change); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close); failure fallbacks are stream notices (Phase 08 Slice A-1, text unchanged after the prefix) |
+| Study Planner | `src/api/routes/planner.py` | `features/planner/Planner.tsx` | Generates plans; latest plan persisted server-side per user, unsaved generated drafts preserved (Phase 08 Slice B + B-1, migration 0005; owner browser checks PASS 2026-11-03); offline smoke PASS 2026-11-02; `generate/sync` off the event loop (Phase 03) (Phase 03 close); eval-only in Phase 07 (no app change); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close); blank weak areas filled from the caller's Mentor profile, fail-open (Phase 08 Slice A; owner browser check PASS 2026-11-03); blank weak areas now use the caller's evaluation weak subjects first, then profile `weak_areas`, each source fail-open (Phase 08 Slice C2; owner browser check PASS 2026-11-04) |
 | Lecture Learning | `src/api/routes/lecture.py` | `features/lecture/Lecture.tsx` | Code present; YouTube reachability UNVERIFIED; pasted transcripts per user (old pastes must be re-pasted); offline smoke PASS 2026-11-02; `process`/`process-text` off the event loop (Phase 03); lecture jobs: heartbeat lease, deadline, 1 transient retry (Phase 04); offline smoke PASS 2026-11-02 (Phase 04 close); chat + notes metadata fenced, `medium` allow-listed, study aids fenced (Phase 07 F3/F7); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
 | PDF / Document Chat | `src/api/routes/upload.py` | `features/upload/Upload.tsx` | Per-user ownership (Phase 02; old uploads must be re-uploaded); runtime UNVERIFIED; offline smoke PASS 2026-11-02; upload `sync=true` offloaded (Phase 03); upload job: heartbeat lease, deadline, no auto-retry (Phase 04 Amendment 1); offline smoke PASS 2026-11-02 (Phase 04 close); chat + notes metadata fenced (Phase 07 F2); offline suite + T1/T2 evals PASS 2026-11-03, real-model UNVERIFIED (Phase 07 close) |
 
-Test suite status (2026-11-03, Phase 07 close): `1520 passed, 2 skipped in 163.72s`. Offline evals (Phase 07): T1 33 pass /
+Test suite status (2026-11-04, Phase 08 Slice C2 / Phase 08 close): full suite `1765 passed, 2 skipped, 19 warnings in 213.62s` (last full run); focused rerun after two post-suite edits `162 passed`; ruff clean; compileall 0; frontend build + lint + JSX escape check clean. Phase 08 Slice C1: `1706 passed, 2 skipped`. Phase 08 Slice B close: full suite `1642 passed, 2 skipped, 16 warnings in 246.17s`; closure focused gates `181 passed`; ruff clean; compileall 0; frontend build + lint clean. Phase 08 Slice A: `1566 passed, 2 skipped, 13 warnings in 173.67s`; ruff clean;
+compileall 0; frontend build + lint clean. Phase 07 close: `1520 passed, 2 skipped in 163.72s`. Offline evals (Phase 07): T1 33 pass /
 0 fail / 1 known gap, T2 72 pass / 0 fail; T3 live NOT RUN. Phase 06 final remediation: `1272 passed, 2 skipped, 13 warnings` (the 2 skips are
 file-symlink escape tests that need Windows symlink privilege; earlier Phase 06 runs: `1267 passed, 1 skipped`
 after round-1 remediation, `1231 passed` at the Stage 2 closeout; Phase 05 close: `1212 passed`; Phase 04 close: `1182 passed`;
@@ -77,12 +79,14 @@ Live workflow smoke (`docs/SMOKE_CHECKLIST.md`): not run — UNVERIFIED.
 | 9 | 24 h semantic cache can serve stale time-sensitive answers — deferred by owner in Phase 06 (Backlog) | MED | backlog |
 | 10 | Eval gate tests CRAG path production never runs — PARTLY CLOSED Phase 07: offline T1/T2 workflow evals now run the 8 production functions (`evals/`, ADR-016); Phase 06 retrieval benchmark (ADR-015). Still open: the old `src/eval/` CRAG gate is unchanged, and real-model safety/quality/cost is UNVERIFIED until the owner validates the token bounds and runs T3 | MED | backlog (T3 owner run; `src/eval/` migration) |
 | 11 | In-memory store fallback when not Postgres | MED | 09 |
-| 12 | Migrations run per process; LangGraph tables outside Alembic | LOW–MED | 09 |
+| 12 | Migrations run per process (concurrent runners now serialized by a PostgreSQL advisory lock, ADR-018; still run twice per boot); LangGraph tables outside Alembic | LOW–MED | 09 |
 | 13 | `/health` checks nothing; no readiness/backups | MED | 09 |
 | 14 | Exception text leaked; PII in logs → CLOSED Phase 02 for touched files (ADR-008); repo-wide log sweep + public `/docs` open | LOW | 09 |
 | 15 | Dead/duplicate code; unused deps/settings | LOW | 09 (kept per ADR-006) |
 | 16 | Non-blocking CI lint; no frontend tests; live smoke disabled | LOW | 09 |
 | 17 | Compose: unpinned qdrant, default creds, exposed ports, unused redis | LOW | 09 |
+| 18 | ~~Supabase grants / RLS for the new tables~~ CLOSED in code (ADR-019): migrations 0005 / 0006 enable RLS (no policies) and revoke the API roles; verified on PostgreSQL 15.19 / 17.11 staging. The owner confirmed RLS is already on for all 14 existing public tables. Open: the first run on real Supabase (post-deploy SQL checks, `docs/phase-reports/phase-08-release-preflight.md` §E) | MED | at first deploy |
+| 19 | Release/rollback: an image with migration 0006 applies it at boot; an older image cannot boot against a newer revision; downgrade is destructive; dashboard "Rollback" would fail. Runbook: preflight §B–C | MED | before first deploy |
 
 ## Doc drift (README.md / ARCHITECTURE.md claims contradicted by source) — RESOLVED in Phase 01 (2026-11-02)
 All items below were corrected in place; claim → evidence table in `docs/phase-reports/phase-01-report.md`.
@@ -430,7 +434,279 @@ All items below were corrected in place; claim → evidence table in `docs/phase
 - (Phase 07) All 60 eval cases are Claude-written (`human_verified: false`). Review them by hand before using them
   as evidence for decisions — OPEN.
 
-### Last handoff — 2026-11-03 (Phase 07 closed)
+- (Phase 08 audit, deferred by owner — Slice D) Session history has no delete / clear / pagination (list capped at
+  50, `src/core/history.py:list_conversations`); a past conversation cannot be resumed in the Mentor (no thread id on
+  `conversations`); uploads / pasted lectures have no server-side "my documents" list or delete, so after sign-out
+  they are reachable only by re-uploading (`src/agents/upload/graph.py`, `src/agents/lecture/graph.py`) — FEATURE / MED (privacy).
+- (Phase 08 audit) Study plan **history** (more than the latest plan) is out of scope by ADR-017 — FEATURE.
+- (Phase 08 audit) Mentor history is written by the browser after the stream (`MentorChat.tsx:persist`); a closed tab
+  mid-answer leaves the checkpoint without a history row. Server-side persistence would change the chat contract — MED.
+- (Phase 08 audit) Progress streak / activity days are UTC (`src/api/routes/progress.py`); IST activity between
+  00:00 and 05:30 counts on the previous day — LOW.
+- (Phase 08 audit) Experiments dashboard returns `experiments: []` (`src/api/routes/experiments.py`, admin-only);
+  implement or hide later — LOW.
+- (Phase 08 audit) `SaveMessageRequest.role` accepts any string (`src/api/routes/history.py`); extends the existing
+  max_length backlog item — LOW.
+- ~~(Phase 08 Slice A) `generate_plan` failure text lacks the `"\n\n"` of `STREAM_NOTICE_PREFIX`~~ RESOLVED in
+  Slice A Amendment A-1: planner / evaluator / CA failure fallbacks use `src/core/stream_notices.py`.
+- (Phase 08 Slice A review) Mentor chat's response cache stores and replays specialist failure text
+  (`src/api/routes/chat.py` `cache.set` after the stream; no failure filter in `src/core/response_cache.py`). The same
+  question gets "⚠️ Plan generation failed" again until the entry expires. Out of Slice A scope (no cache redesign) — MED.
+- (Phase 08 Slice A) `MentorChat` reads `conversationId` from the render that started `send()`; a second message
+  sent before the first exchange's save returns can still start a new conversation (same race as the old ref).
+  The "New chat" race is fixed (A-1) — LOW.
+- (Phase 08 final Slice A review) `src/agents/current_affairs/graph.py` logs raw exception text in its daily /
+  editorial / monthly failure handlers (`logger.error(f"... failed: {e}")`). Pre-existing; Slice A changed only the
+  yielded notice. Fix: `describe_exception(e)` like the evaluator / planner — LOW.
+- (Frontend polish 2026-11-03) `frontend/scripts/check-jsx-escapes.mjs` resolves its own path with
+  `new URL(import.meta.url).pathname`, which breaks on checkout paths with spaces / non-ASCII (percent-encoded);
+  use `fileURLToPath`. The check is manual (`node scripts/check-jsx-escapes.mjs`); wiring it into
+  `package.json` / CI needs owner approval — LOW.
+- (Frontend polish 2026-11-03) `frontend/README.md` contains 31 literal `\uXXXX` escapes (renders wrongly on
+  GitHub; documentation only, not UI) — LOW.
+
+- (Phase 08 Slice B security review LOW #2) `src/api/routes/planner.py` GET / PATCH / DELETE `/planner/plan`: DB
+  errors return the global fixed-message 500 instead of 503 (spec R-B4 only covers PUT) — LOW.
+- (Phase 08 Slice B security review INFO) `frontend/src/lib/planMarkdown.ts` `slugify` has no length cap; a plan
+  heading longer than ~140 chars yields progress keys > 160 chars, so that section's ticks get 422 on PATCH — LOW.
+
+- (Phase 08 Slice B code review N1) `src/core/study_plans.py:update_progress`: a DB error on PATCH (e.g. SQLite lock)
+  → global 500 + full exception log (progress keys only); map `SQLAlchemyError` to a fixed 503 like PUT — LOW.
+- (Slice B review N2) `frontend/src/features/planner/Planner.tsx` debounced PATCH: two overlapping PATCHes could
+  arrive out of order and leave older ticks saved while the client shows synced; send one PATCH at a time — LOW.
+- (Slice B review N3) `Planner.tsx` mount reconcile: under React StrictMode (dev only) both effect runs complete
+  (2 GETs, possibly 2 identical re-sent PATCHes); use a per-effect cancel flag — LOW.
+- (Slice B review N5) `tests/test_study_plans.py` concurrency test does not assert that at least one round was a
+  real conflict update (correctness assertions hold either way) — LOW.
+- (Slice B review N6, residual) a plan cached before Slice B has no recorded inputs, so its explicit Save stores the
+  current form inputs — LOW.
+- (Slice C1 security LOW #1) `src/core/evaluation_history.py:record_attempt`: no per-user row cap or retention
+  for `evaluation_attempts`; each row costs an LLM call and the per-IP rate limit applies. Decide retention/cap and
+  use bounded queries when C2 adds reads — LOW.
+- (Slice C1 security INFO #3) `migrations/versions/0006_evaluation_attempts.py`: `ix_evaluation_attempts_user_id` is
+  redundant with the composite `(user_id, subject, created_at)` index; kept because spec R-C1-2 requires both —
+  INFO.
+- (Slice C1 code-quality NIT 4) `frontend/src/lib/api.ts` `EVALUATION_SUBJECTS` mirrors `src/schemas.py` `Subject`
+  by hand, with no automated parity check. Drift would make the server return 422 for a subject the UI offers — LOW.
+- (Slice C1 browser check, pre-existing) `frontend/src/features/evaluator/Evaluator.tsx` `MIN_ANSWER = 50` counts
+  **characters**, while `src/agents/evaluator/graph.py:evaluate_answer` requires 50 **words**. A 50-character answer
+  gets "Answer too short" and is recorded as unscored (correct per R-C1-3, but confusing UX) — LOW.
+- (Slice C2 code-quality NIT 1) `src/core/evaluation_history.py:load_attempts` reads the latest 500 attempts
+  (scored and unscored). For a user above 500, counts / average cover only those and a subject not evaluated within
+  them drops out of mastery / weak / revision. Option: exact `COUNT` + per-subject window — LOW.
+- (Slice C2 code-quality NIT 2) No index serves `WHERE user_id ORDER BY created_at DESC` exactly (composite is
+  `(user_id, subject, created_at)`); fine at current scale; a new index needs a migration — INFO.
+- (Slice C2 code-quality NIT 3, pre-existing since Slice A) `src/api/routes/planner.py:_resolve_weak` truncates the
+  joined weak areas at `SHORT_TEXT_MAX`, which can cut the last item mid-word; option: drop whole items — LOW.
+- (Slice C2 code-quality NIT 4) `frontend/src/features/dashboard/Dashboard.tsx` overdue revision rows show "Due now"
+  without the date they became due — LOW.
+- (Slice C2 security LOW/INFO, pre-existing) `src/api/routes/progress.py` outer `except` in `progress_overview` logs
+  with `exc_info=True` (a driver traceback may include SQL / the bound user id); `/progress/overview` and planner
+  generation rely only on the global per-IP limiter — LOW.
+- (Slice C2) Revision `next_due` / `due` use UTC dates (like the UTC streak item above) — LOW.
+
+### Last handoff — 2026-11-04 (Phase 08 FINAL RELEASE prepared; deployment is the owner's manual step)
+- Phase 08 stays **COMPLETE** (slices A + A-1, B + B-1, C1, C2 CLOSED). **Phase 09 NOT STARTED.** Render Auto-Deploy is
+  **OFF**: pushing to `main` deploys nothing; the owner clicks Manual Deploy. Deployment is NOT done and NOT verified.
+- Table security (ADR-019): migrations 0005 and 0006 (never deployed, so edited in place) enable RLS with **no policies**
+  on `study_plans` / `evaluation_attempts` and revoke all privileges from `anon`, `authenticated`, `service_role`
+  (skipped for roles that do not exist), PostgreSQL only, same transaction as `CREATE TABLE`; no `FORCE`, no change to
+  existing tables / grants / policies / global default privileges; SQLite unchanged; the advisory lock (ADR-018) is
+  unchanged.
+- Owner-confirmed production facts: existing public application tables are owned by `postgres`; RLS is enabled on all 14
+  currently listed public tables (including `alembic_version`), `force_rls` false; existing API-role grants still appear
+  in privilege checks and were deliberately left alone; PostgreSQL is 17.11.
+- Verification (this session): `uv run pytest -q tests/test_migrations.py` → `17 passed`; `uv run ruff check src tests`
+  clean; `compileall` OK; `git diff --check` clean; focused set (migrations, study plans, evaluation attempts and
+  analytics, progress overview, planner autofill, ownership / chat isolation, workflow smoke) → `269 passed, 23 warnings
+  in 64.39s`. Disposable PostgreSQL 15.19 and
+  17.11 staging: **236 checks passed, 0 failed** (non-superuser owner, plain and Supabase-like clusters, existing-table
+  grants / RLS / default ACL unchanged, API roles refused, lock + 20 / 20 concurrent rounds, downgrade / re-upgrade,
+  `init_db()` no-op, Mentor store persistence). Details: `docs/phase-reports/phase-08-release-preflight.md` section E.
+  The full 1765-test suite was not re-run (no application code changed).
+- Deployment: ONE combined release of 0005 + 0006 (an image containing 0006 applies it at boot, `Dockerfile:74`);
+  take and verify a Supabase backup first; roll back by forward-fix (an older image cannot boot against a newer
+  revision); post-deploy SQL checks and the eight-workflow smoke are in the preflight document and
+  `docs/SMOKE_CHECKLIST.md`.
+- Still UNVERIFIED: the migrations on the real Supabase (pooler mode), Render's behaviour on a failed deploy, the live
+  workflow smoke, and the owner's backup.
+
+### Earlier handoff — 2026-11-04 (Phase 08 release preflight written; NOT a deployment authorization)
+- Phase 08 stays **COMPLETE** (slices A + A-1, B + B-1, C1, C2 CLOSED); **Phase 09 NOT STARTED**. Review and
+  documentation only: no SQL executed, no migration edited, nothing staged / committed / pushed / deployed, the
+  advisory-lock code is unchanged. Full document: `docs/phase-reports/phase-08-release-preflight.md`.
+- Owner evidence incorporated (Supabase SQL Editor, PostgreSQL 17.11): `pg_default_acl` grants `arwdDxtm` on future
+  public tables to `anon`, `authenticated` and `service_role` for creators `postgres` and `supabase_admin`. Supabase
+  documents that `supabase_admin`'s defaults cannot be changed by the project (`42501`) and apply only to objects that
+  role creates; tables the app creates take `postgres`'s defaults, which can be changed with
+  `ALTER DEFAULT PRIVILEGES FOR ROLE postgres …`. Nothing in the repo uses `service_role`, the Data API or a Supabase
+  client (all access is direct SQLAlchemy / psycopg).
+- **Open release blockers:** (B1) choose and apply the grants / RLS lock-down (proposed SQL P1 before the deploy, P2
+  after; NOT EXECUTED); (B2) confirm the app / migration role (assumed `postgres`) with read-only queries Q3 + Q4;
+  (B3) check the RLS / grant state of the EXISTING tables (potentially CRITICAL if the Data API exposes `public`;
+  UNVERIFIED); (B4) confirm backup capability and take a `pg_dump`.
+- Sequencing: ONE combined release of 0005 + 0006 is recommended — an image that contains 0006 applies it at boot
+  (`Dockerfile:74`, `init_db()`); ADR-017's "deploy separately" is marked superseded. Rollback: an older image cannot
+  boot against a newer revision (`Can't locate revision identified by '0006_evaluation_attempts'`, probe-confirmed);
+  downgrade drops both tables and their data; prefer forward-fix, and revert application code while keeping the
+  migration files. Runbook in the preflight document, section C.
+- Docs corrected in this step: `docs/SMOKE_CHECKLIST.md` (rows 4 and 6, new "Phase 08 persistence checks"),
+  `.claude/specs/README.md` (row 08), ADR-017 sequencing bullet (kept, marked superseded), this file.
+- Still stale, not in this step's scope: the Phase 08 spec / plan headers say "APPROVED" without a COMPLETE marker;
+  `PROJECT_STATE.md` still says "Frontend unchanged in Phase 03 …" and mentions `checkpoints.sqlite-shm/-wal` side
+  files that no longer exist.
+- Nightly CI `llm-eval` (`.github/workflows/ci.yml:83`) receives `secrets.DATABASE_URL`; the eval modules never call
+  `init_db()` / Alembic. What the secret points at is UNKNOWN — owner to confirm it is not production — LOW.
+
+### Earlier handoff — 2026-11-04 (Phase 08 release hardening: Alembic advisory lock, ADR-018)
+- Not a reopening of any Phase 08 slice and not Phase 09 (**Phase 09 still NOT STARTED**). Owner-approved hardening
+  before the first production deploy. Nothing committed, pushed or deployed; production and Supabase never touched.
+- Facts confirmed by the owner (not verifiable from the repository): Render service is **Docker**, Docker Command
+  blank (image `CMD` runs: `alembic upgrade head && uvicorn …`, `Dockerfile:74`), Pre-Deploy Command unavailable,
+  Auto-Deploy **Off**; production PostgreSQL is Supabase **17.11**. `render.yaml` (`runtime: python`, `startCommand`)
+  does not govern this service.
+- Code: `migrations/env.py` takes `pg_advisory_xact_lock(80080601)` inside the migration transaction, same
+  connection, right before `run_migrations()`; PostgreSQL only, SQLite unchanged. `tests/test_migrations.py` +8 tests
+  (lock helper, PostgreSQL vs other dialects, call-site wiring, SQLite emits no advisory statement). The format hook
+  also applied two cosmetic changes in `env.py` (blank line after the docstring, one collapsed call) and reformatted
+  three pre-existing long asserts in `tests/test_migrations.py`; no behaviour change.
+- Gates run: `uv run pytest -q tests/test_migrations.py` → `12 passed`; `uv run ruff check src tests` → clean;
+  `git diff --check` clean. The full suite was **not** re-run (not required by the change; last full run
+  `1765 passed, 2 skipped`).
+- Disposable-PostgreSQL staging (Docker, `postgres:15.19-alpine` and `postgres:17.11-alpine`, internal network, tmpfs,
+  throwaway credentials, no `.env` in the build context): **85 checks passed, 0 failed.** Covers 0004→0005→0006,
+  constraints / indexes, real plan upsert + attempts + analytics, cascade, downgrade / re-upgrade, `init_db()` at
+  head, lock blocking a second runner, 3 concurrent runners × 10 rounds per version (20 / 20 rounds: all exit 0, final
+  `0006_evaluation_attempts`) and Mentor `PostgresStore` persistence across containers. The old `env.py` failed 3 / 10
+  rounds on 15.19 (races are real). Details: ADR-018.
+- **Still UNVERIFIED:** Supabase itself (pooler mode, role privileges, RLS / grants for `study_plans` and
+  `evaluation_attempts`), a restore of real production data, Render's deploy overlap, `Store: Postgres` in the real
+  deployment, and the live smoke of the 8 workflows. The staging runner script lives in the session scratchpad, not in
+  the repository (adding it under `scripts/` needs owner approval).
+- Consequence for deployment: ADR-017's "deploy 0005 and 0006 separately" cannot be done with one image — any image
+  containing `0006_evaluation_attempts.py` applies it on boot. Choose: deploy a commit with only 0005 first, or one
+  combined deploy. Roll back database first, then code.
+- Backlog (LOW): `ruff check migrations/env.py` reports a pre-existing I001 (import order, lines untouched by this
+  change); CI lints only `src tests`. `docs/SMOKE_CHECKLIST.md` row 6 still says plans are not persisted and has no
+  rows for `/planner/plan` or `/progress/overview`. `.claude/specs/README.md` row 08 still says "Slice A next".
+
+### Earlier handoff — 2026-11-04 (Phase 08 COMPLETE — Slice C2 CLOSED)
+- **Phase 08 — COMPLETE.** Slices **A + A-1, B + B-1, C1 and C2 are all CLOSED.** Reports:
+  `docs/phase-reports/phase-08-slice-{a,b,c1,c2}-report.md`. **Phase 09 NOT STARTED** (needs explicit owner approval).
+- C2 delivered (no migration): Average Evaluation Score, subject mastery (latest 10 scored), weak subjects (≥ 3, < 60 %),
+  subject-based revision (1/3/7/14 days by consecutive passes, UTC) on `/progress/overview` (additive; legacy
+  `topics` / `weak_topics` = `[]`); Dashboard cards / chart / lists; Planner autofill = weak subjects first, then
+  profile `weak_areas` (Amendment C2-1, which also updated two shape expectations in `tests/test_progress_overview.py`).
+- Gates: full suite `1765 passed, 2 skipped`; focused `162 passed`; ruff, compileall, frontend build + lint, JSX escape
+  check clean. Reviews: security no CRIT/HIGH/MED (LOW rollback fixed); code-quality no BLOCKER/SHOULD-FIX.
+- Browser checks 1–8 owner-confirmed PASS on an isolated environment (scratchpad SQLite via `create_all`, no Alembic,
+  external services off, outbound network blocked — 0 attempts, mock LLMs, backend 8012, frontend 5176). Check 6
+  independently verified in the request log; check 8 browser request not captured (API smoke + tests only).
+- **Migrations 0005 and 0006 have never been executed against production or any real DB** (throwaway SQLite in
+  tests only). Owner before deploying: Supabase backup before each; grants / RLS for `study_plans` and
+  `evaluation_attempts`; confirm the LangGraph store is Postgres; deploy B and C1 separately; post-deploy smoke.
+- Uncommitted working tree (A + A-1 + polish + B + B-1 + C1 + C2); no commit or push made.
+- Next step: owner commits if wanted; Phase 09 only after explicit approval.
+
+### Earlier handoff — 2026-11-04 (Phase 08 Slice C1 CLOSED)
+- Active phase: **Phase 08 — ACTIVE.** **Slice A + A-1, Slice B + B-1 and Slice C1 are CLOSED.** **Slice C2 NOT
+  STARTED** (needs explicit owner approval). Report `docs/phase-reports/phase-08-slice-c1-report.md`.
+- C1 delivered:
+  - `evaluation_attempts` (migration 0006) with no question or answer text
+  - optional allow-listed `subject` on Basic and Mains
+  - best-effort recording with a redacted warning
+  - "Subject (optional)" dropdown
+- Gates:
+  - full suite `1706 passed, 2 skipped`; focused `161 passed`
+  - ruff, compileall, frontend build and lint, and the JSX escape check all clean
+- Reviews: security has no CRIT/HIGH/MED; code-quality has no BLOCKER/SHOULD-FIX.
+- Browser checks 1–6: owner-confirmed PASS on an isolated environment.
+  - Setup: scratchpad SQLite built by `create_all` (no Alembic), all external services off, mock evaluator,
+    backend 8011, frontend 5175.
+  - Independently verified: check 2 (`subject='Geography'` → row `basic / Geography / 7.0 / 10`; no-subject request →
+    NULL) and the DB row columns.
+  - Check 4 backend evidence partial; check 5 browser request not captured (API smoke + unit test only).
+- **Migration 0006 has never been executed against production or any real DB.** It ran only on throwaway SQLite in
+  tests.
+- Owner before deploying 0006: Supabase backup; grants / RLS for `evaluation_attempts`; deploy C1 separately from B.
+- Uncommitted working tree (A + A-1 + polish + B + C1); no commit or push made.
+- Next step: owner commits if wanted, then explicitly approves **Slice C2** (no migration).
+
+### Earlier handoff — 2026-11-04 (Phase 08 Slice C1 implemented; awaiting owner check)
+- Active phase: **Phase 08 — ACTIVE.** A + A-1 and B + B-1 CLOSED. **Slice C1 IMPLEMENTED, verified offline, not yet
+  closed.** Report `docs/phase-reports/phase-08-slice-c1-report.md`.
+- C1 files: `src/core/models.py` (`EvaluationAttempt`), `migrations/versions/0006_evaluation_attempts.py`,
+  `src/schemas.py` (`Subject`), `src/core/evaluation_history.py`, `src/api/routes/evaluator.py`,
+  `frontend/src/lib/api.ts`, `frontend/src/features/evaluator/Evaluator.tsx`, `tests/test_evaluation_attempts.py`.
+- Gates (2026-11-04):
+  - full suite `1706 passed, 2 skipped`; focused `161 passed` (re-run after test-only NIT fixes)
+  - ruff clean; compileall OK
+  - frontend build + lint clean; JSX escape check OK
+  - migration 0006 upgrade, CASCADE and downgrade verified on throwaway SQLite only
+- Reviews: security has no CRIT/HIGH/MED (2 LOW → backlog / noted); code-quality has no BLOCKER/SHOULD-FIX
+  (NIT 1, 2 fixed).
+- UNVERIFIED: AC-C1-5 owner browser check of the dropdown (6 checks in the report); Supabase 0006 apply / grants /
+  RLS / backup (owner only; deploy C1 separately from B).
+- Uncommitted working tree (A + A-1 + polish + B + C1); no commit or push made.
+- Next step: owner runs the browser checks and approves the C1 close. **Slice C2 NOT STARTED**, and it needs
+  explicit approval.
+
+### Earlier handoff — 2026-11-03 (Phase 08 Slice B CLOSED)
+- Active phase: **Phase 08 — ACTIVE.** Slice A + A-1 CLOSED; **Slice B + Amendment B-1 CLOSED** (all 9 owner browser
+  checks PASS; final closure review no BLOCKER / SHOULD-FIX). Report `docs/phase-reports/phase-08-slice-b-report.md`.
+- Check-1 render crash fixed (pre-existing `Planner.tsx` `onToggle` read `e.currentTarget` inside a deferred
+  state updater); verified by a scratchpad headless-Chrome check 14/14.
+- Closure gates: focused pytest `181 passed`; ruff clean; compileall 0; `git diff --check` clean; frontend build +
+  lint clean; JSX escape check OK; Node check of `reconcilePlan.ts` 15/15. Full suite not re-run (last `1642 passed,
+  2 skipped`).
+- Owner before deploying 0005: Supabase backup; grants / RLS for `study_plans`; deploy B separately from C1.
+- Uncommitted working tree (Slice A + A-1 + polish + Slice B); no commit or push made.
+- Next step: owner commits if wanted, then explicitly approves **Slice C1** (migration 0006). **C1 / C2 NOT STARTED.**
+
+### Earlier handoff — 2026-11-03 (Phase 08 Slice B implemented; awaiting owner checks)
+- Slice B implemented and verified offline: `src/core/models.py` `StudyPlan`; `migrations/versions/0005_study_plans.py`
+  (written, never run by Claude; downgrade verified on throwaway SQLite only); `src/schemas.py`;
+  `src/core/study_plans.py`; 4 endpoints in `src/api/routes/planner.py`; `api.ts`; `Planner.tsx` reconciliation;
+  `tests/test_study_plans.py` (40). Full suite `1642 passed, 2 skipped` (before security fix #1; focused re-run 45
+  passed after it); ruff, compileall, diff --check, frontend build + lint clean. Report
+  `docs/phase-reports/phase-08-slice-b-report.md`.
+- Slice A / A-1 / polish changes verified intact. Uncommitted; no commit or push.
+- Code-quality review: no BLOCKER; S1 (option a) and S2 fixed by owner-approved Amendment B-1 (frontend only:
+  `Planner.tsx`, new `features/planner/reconcilePlan.ts`; Node check 15/15; build + lint clean); NITs in backlog.
+- Next step: owner runs the 9 manual browser checks (isolated local env, report § Manual browser checks), takes a
+  Supabase backup before any deploy of 0005, then approves Slice B close. **C1 / C2 NOT started.**
+
+### Earlier handoff — 2026-11-03 (Phase 08 Slice A + Amendment A-1 CLOSED)
+- Active phase: **Phase 08 — ACTIVE.** Slice A (A1–A5) and Amendment A-1 **CLOSED**. Final read-only review of the
+  full diff: no BLOCKER / SHOULD-FIX (2 LOW NITs → backlog above). Owner manual browser checks all **PASS**: Mentor
+  reload + conversation continuity; New Chat creates a separate conversation; in-flight save race does not restore
+  the previous conversation; specialist failures not saved in Session History; Dashboard labels; Planner weak-area
+  autofill. Report `docs/phase-reports/phase-08-slice-a-report.md`.
+- Separate frontend polish (not part of Slice A scope): 17 literal Unicode escapes rendered as text fixed in
+  `index.html`, `Topbar.tsx`, `Lecture.tsx`, `Upload.tsx`, `Planner.tsx` (2 lines), `AppLayout.tsx`; new
+  `frontend/scripts/check-jsx-escapes.mjs` (TS-AST check of JSX text / JSX attribute strings; passes). All 17
+  browser-verified by the owner. Build + lint clean.
+- Gates: initial full suite `1566 passed, 2 skipped`; after A-1, the related files `402 passed` (full suite not
+  re-run, per owner instruction); ruff clean; compileall 0; `git diff --check` clean; frontend build + lint clean;
+  Node check of `persistExchange.ts` 10/10.
+- Uncommitted working tree (no commit or push made).
+- Next step: owner commits Slice A (+ polish) if wanted, then explicitly approves **Slice B** (migration 0005).
+  **Slice B NOT STARTED.**
+
+### Earlier handoff — 2026-11-03 (Phase 08 planned; documentation only)
+- Active phase: **Phase 08 Product persistence & gaps — ACTIVE.** Spec `.claude/specs/phase-08-product-gaps.md`
+  (APPROVED rev 4), plan `.claude/plans/phase-08-product-gaps.md`, ADR-017. No application code, tests or migrations
+  changed in this session.
+- Slices (each approved, implemented, verified, reviewed and reported separately):
+  A bug fixes + progress tests (no schema) → B study-plan persistence (migration 0005, atomic upsert + concurrency
+  test) → C1 evaluation recording + subject dropdown (0006) → C2 subject analytics, weak subjects, revision, Dashboard.
+- Confirmed bugs for Slice A: B1 false Planner autofill claim; B2 Mentor history splits after reload; B3 error notices
+  saved as Mentor answers; B4 misleading Dashboard labels; B5 `/progress/overview` untested.
+- Next step: implement **Slice A only** in a fresh chat (`/implement-phase`), then stop for the Slice A report.
+- Owner-only before B / C1 deploys: Supabase backup; confirm the LangGraph store is Postgres; table grants / RLS.
+- Test baseline unchanged: `1520 passed, 2 skipped` (Phase 07 close; not re-run in this documentation session).
+
+### Previous handoff — 2026-11-03 (Phase 07 closed)
 - Active phase: none in progress. **Phase 07 LLM evaluation, safety & quality — DONE (2026-11-03).** Report:
   `docs/phase-reports/phase-07-report.md`. ADR-016 (+ addenda through the final budget review). Phase 08 (product gaps)
   not started; wait for the user.
@@ -454,6 +730,6 @@ All items below were corrected in place; claim → evidence table in `docs/phase
   - The 60 eval cases are Claude-written (`human_verified: false`).
 - Repo hygiene: `checkpoints.sqlite-shm` / `checkpoints.sqlite-wal` side files are present (local checkpoint DB; not
   opened by Claude).
-- Next step: the owner reviews and, if wanted, commits Phase 07. Then `/start-phase 8` when the owner asks.
+- Next step (superseded): Phase 07 committed as `86a7753`; Phase 08 planned (see above).
 - Uncommitted changes: see `git status --porcelain` in the phase report (Phase 07 code, tests, `evals/`, docs and the
   07→08 spec renumbering). Nothing committed or pushed.

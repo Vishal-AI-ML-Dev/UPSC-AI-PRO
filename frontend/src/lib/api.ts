@@ -54,6 +54,27 @@ export interface ActivityPoint {
   count: number
 }
 
+// Phase 08 Slice C2: evaluation analytics. Percentages are fractions in [0, 1];
+// unscored attempts are excluded from every percentage.
+export interface EvaluationScoreSummary {
+  attempts: number
+  scored: number
+  average_score_pct: number
+}
+
+export interface SubjectMastery {
+  subject: string
+  mastery: number
+  // Scored attempts in the mastery window (latest 10).
+  attempts: number
+}
+
+export interface SubjectRevision {
+  subject: string
+  next_due: string // UTC date, YYYY-MM-DD
+  due: boolean
+}
+
 export interface ProgressOverview {
   streak: {
     current: number
@@ -61,11 +82,18 @@ export interface ProgressOverview {
     active_today: boolean
     activity: ActivityPoint[]
   }
+  /** @deprecated always [] — only subject-level data exists (see `subjects`). */
   topics: TopicMastery[]
+  /** @deprecated always [] — see `weak_subjects`. */
   weak_topics: string[]
-  revision: { due: number; total: number }
+  revision: { due: number; total: number; subjects: SubjectRevision[] }
   questions: { total: number; correct: number; accuracy: number }
   totals: { conversations: number; active_days: number; questions_asked: number }
+  evaluations: EvaluationScoreSummary & {
+    by_mode: { basic: EvaluationScoreSummary; mains: EvaluationScoreSummary }
+  }
+  subjects: SubjectMastery[]
+  weak_subjects: SubjectMastery[]
 }
 
 export interface CostAgentRow {
@@ -159,6 +187,26 @@ export interface MainsEvaluation {
   improvements: string[]
 }
 
+/** Allow-listed evaluation subjects; mirrors `Subject` in src/schemas.py (Phase 08 C1). */
+export const EVALUATION_SUBJECTS = [
+  "Polity & Governance",
+  "Economy",
+  "History & Culture",
+  "Geography",
+  "Environment & Ecology",
+  "Science & Technology",
+  "International Relations",
+  "Society & Social Justice",
+  "Ethics",
+  "Internal Security & Disaster Management",
+] as const
+
+export type EvaluationSubject = (typeof EVALUATION_SUBJECTS)[number]
+
+export function isEvaluationSubject(value: unknown): value is EvaluationSubject {
+  return (EVALUATION_SUBJECTS as readonly unknown[]).includes(value)
+}
+
 export interface ExperimentVariantResult {
   variant: string
   up: number
@@ -217,6 +265,36 @@ export interface StudyPlanMeta {
 export interface PlannerResult {
   plan: string
   meta: StudyPlanMeta | null
+}
+
+// Saved (latest) study plan — one per user, addressed by the session's user.
+export interface StudyPlanInputs {
+  hours: string
+  optional?: string | null
+  weak?: string | null
+  attempt_number?: string | null
+}
+
+export interface SavedStudyPlan {
+  id: string
+  goal: string
+  inputs: Partial<StudyPlanInputs>
+  plan_md: string
+  meta: StudyPlanMeta | null
+  progress: Record<string, boolean>
+  created_at: string
+  updated_at: string
+}
+
+export interface SavedStudyPlanRef {
+  id: string
+  updated_at: string
+}
+
+export interface StudyPlanProgress {
+  id: string
+  progress: Record<string, boolean>
+  updated_at: string
 }
 
 export interface NcertList {
@@ -781,6 +859,7 @@ export const api = {
   evaluateAnswer(input: {
     question: string
     answer: string
+    subject?: EvaluationSubject
   }): Promise<{ response: string; structured: AnswerEvaluation }> {
     return request("/evaluator/evaluate/sync", {
       method: "POST",
@@ -795,6 +874,7 @@ export const api = {
     marks?: number
     keywords?: string[]
     word_limit?: number
+    subject?: EvaluationSubject
   }): Promise<{ response: string; structured: MainsEvaluation }> {
     return request("/evaluator/mains/sync", {
       method: "POST",
@@ -829,6 +909,35 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     })
+  },
+  getPlan(): Promise<{ plan: SavedStudyPlan | null }> {
+    return request("/planner/plan")
+  },
+  // Replaces the saved plan: a new id, progress reset.
+  savePlan(input: {
+    goal: string
+    inputs: StudyPlanInputs
+    plan_md: string
+  }): Promise<SavedStudyPlanRef> {
+    return request("/planner/plan", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })
+  },
+  // 409 when planId is no longer the saved plan, 404 when there is none.
+  patchPlanProgress(
+    planId: string,
+    progress: Record<string, boolean>,
+  ): Promise<StudyPlanProgress> {
+    return request("/planner/plan/progress", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan_id: planId, progress }),
+    })
+  },
+  deletePlan(): Promise<void> {
+    return request("/planner/plan", { method: "DELETE" })
   },
 
   // ── NCERT (class -> subject -> chapter study) ──
@@ -936,6 +1045,16 @@ export interface MentorMessage {
   content: string
 }
 
+// Prefix of a stream notice: a fixed failure / stop message, not an answer.
+// Used by every notice streamAgent emits itself and by the known Mentor-chat
+// notices (chat errors and timeouts, session stop notices, and the planner /
+// evaluator / current-affairs failure fallbacks, via src/core/stream_notices.py).
+// MentorChat never saves an exchange containing it. Other backend warnings are
+// not part of this contract: "> ⚠️" disclaimers do not use it, while the NCERT
+// trust note starts with the same characters but is a legitimate answer. Do not
+// apply this check to other features' output without checking them first.
+export const STREAM_NOTICE_PREFIX = "\n\n⚠️ "
+
 // Generic text/plain token streamer for the agent endpoints that stream their
 // output (planner, pyq, ncert, current affairs, and the upload/lecture chats).
 // Takes an arbitrary path + JSON body and streams the text/plain response.
@@ -966,10 +1085,11 @@ export async function streamAgent(
       })
     } catch (e) {
       if (sig.aborted) return
-      if (e instanceof ApiConfigError) emit("\n\n⚠️ " + e.message)
+      if (e instanceof ApiConfigError) emit(STREAM_NOTICE_PREFIX + e.message)
       else
         emit(
-          "\n\n⚠️ Backend connection error. Is the API reachable at " +
+          STREAM_NOTICE_PREFIX +
+            "Backend connection error. Is the API reachable at " +
             describeApiBase() +
             "?",
         )
@@ -980,14 +1100,18 @@ export async function streamAgent(
     const r = await after401(res, sentToken, attempt === 0)
     if (sig.aborted) return
     if (!r.retry) {
-      emit("\n\n⚠️ " + r.detail)
+      emit(STREAM_NOTICE_PREFIX + r.detail)
       return
     }
   }
   if (!res) return
   if (!res.ok || !res.body) {
-    if (res.status === 401) emit("\n\n⚠️ Session expired. Please sign in again.")
-    else emit("\n\n⚠️ Error " + res.status + ": " + (await parseError(res)))
+    if (res.status === 401)
+      emit(STREAM_NOTICE_PREFIX + "Session expired. Please sign in again.")
+    else
+      emit(
+        STREAM_NOTICE_PREFIX + "Error " + res.status + ": " + (await parseError(res)),
+      )
     return
   }
   const reader = res.body.getReader()

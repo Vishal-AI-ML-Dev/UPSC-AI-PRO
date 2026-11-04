@@ -16,6 +16,7 @@ from src.agents.planner.constants import (
 from src.agents.planner.prompts import PLANNER_PROMPT
 from src.core import mentor_kb
 from src.core.llm import describe_exception, get_llm, message_text
+from src.core.stream_notices import stream_notice
 
 # Official / trusted domains for live UPSC date lookups
 TRUSTED_DOMAINS = [
@@ -231,7 +232,7 @@ def generate_plan(
         logger.error(
             "Plan generation failed: %s", describe_exception(e), extra={"safe_summary": True}
         )
-        yield "⚠️ Plan generation failed. Please try again."
+        yield stream_notice("Plan generation failed. Please try again.")
 
 
 def get_plan_meta(goal: str):

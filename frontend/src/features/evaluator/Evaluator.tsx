@@ -1,6 +1,12 @@
 import { useState } from "react"
 import { usePersistentState } from "../../lib/usePersistentState"
-import { api, type AnswerEvaluation, type MainsEvaluation } from "../../lib/api"
+import {
+  api,
+  EVALUATION_SUBJECTS,
+  isEvaluationSubject,
+  type AnswerEvaluation,
+  type MainsEvaluation,
+} from "../../lib/api"
 import { Markdown } from "../../components/Markdown"
 import { Feedback } from "../../components/Feedback"
 import { Button, Card, Spinner } from "../../components/ui"
@@ -82,6 +88,9 @@ export function Evaluator() {
   const [marks, setMarks] = usePersistentState("eval:marks", 10)
   const [wordLimit, setWordLimit] = usePersistentState("eval:wordLimit", 150)
   const [keywords, setKeywords] = usePersistentState("eval:keywords", "")
+  // "" = no subject. A stale or tampered stored value is never sent (allow-list check).
+  const [subject, setSubject] = usePersistentState("eval:subject", "")
+  const subjectToSend = isEvaluationSubject(subject) ? subject : undefined
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -113,6 +122,7 @@ export function Evaluator() {
         const r = await api.evaluateAnswer({
           question: question.trim(),
           answer: answer.trim(),
+          subject: subjectToSend,
         })
         setResult({ response: r.response, answer: r.structured })
       } else {
@@ -122,6 +132,7 @@ export function Evaluator() {
           marks,
           word_limit: wordLimit,
           keywords: keywordList(),
+          subject: subjectToSend,
         })
         setResult({ response: r.response, mains: r.structured })
       }
@@ -212,6 +223,27 @@ export function Evaluator() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label
+              htmlFor="eval-subject"
+              className="mb-1 block text-sm font-medium text-fg"
+            >
+              Subject <span className="text-muted">(optional)</span>
+            </label>
+            <select
+              id="eval-subject"
+              className="input w-full"
+              value={subjectToSend ?? ""}
+              onChange={(e) => setSubject(e.target.value)}
+            >
+              <option value="">No subject</option>
+              {EVALUATION_SUBJECTS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
           {mode === "mains" && (
             <div>
               <label className="mb-1 block text-sm font-medium text-fg">Marks</label>

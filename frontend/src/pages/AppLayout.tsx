@@ -100,7 +100,7 @@ export function AppLayout() {
             <Suspense
               fallback={
                 <div className="grid place-items-center py-20">
-                  <Spinner label="Loading\u2026" />
+                  <Spinner label="Loading…" />
                 </div>
               }
             >

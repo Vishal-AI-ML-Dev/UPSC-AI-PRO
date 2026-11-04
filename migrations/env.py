@@ -5,6 +5,7 @@ DATABASE_URL the app uses) so Alembic and the app never diverge. A URL passed
 via ``config.set_main_option("sqlalchemy.url", ...)`` (e.g. from tests) takes
 precedence, which lets the migration test target a throwaway SQLite file.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -12,7 +13,7 @@ import sys
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 # Make the project importable when Alembic runs from the repo root.
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -59,13 +60,32 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Serializes concurrent migration runners (e.g. two containers booting at once:
+# the Docker CMD and ``init_db()`` both run ``alembic upgrade head``). Arbitrary
+# app-unique bigint; a second runner waits here, then re-reads ``alembic_version``
+# and finds nothing left to do. Phase 08 release hardening (ADR-018).
+_MIGRATION_LOCK_ID = 80080601
+
+
+def _acquire_migration_lock(connection) -> None:
+    """PostgreSQL only: take a transaction-scoped advisory lock on ``connection``.
+
+    ``pg_advisory_xact_lock`` is released automatically when the migration
+    transaction commits or rolls back, so it also works behind a
+    transaction-mode pooler (a session-level lock would not). Must be called
+    inside ``context.begin_transaction()`` on the same connection the
+    migrations use. A no-op on every other dialect (SQLite is unchanged).
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    connection.execute(text(f"SELECT pg_advisory_xact_lock({int(_MIGRATION_LOCK_ID)})"))
+
+
 def run_migrations_online() -> None:
     """Run migrations against a live DB connection."""
     section = config.get_section(config.config_ini_section) or {}
     section["sqlalchemy.url"] = url
-    connectable = engine_from_config(
-        section, prefix="sqlalchemy.", poolclass=pool.NullPool
-    )
+    connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
@@ -74,6 +94,7 @@ def run_migrations_online() -> None:
             render_as_batch=_is_sqlite,
         )
         with context.begin_transaction():
+            _acquire_migration_lock(connection)
             context.run_migrations()
     connectable.dispose()
 

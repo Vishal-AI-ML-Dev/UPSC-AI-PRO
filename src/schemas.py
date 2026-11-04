@@ -2,9 +2,9 @@
 Pydantic schemas for request/response models
 """
 
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional, get_args
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool
 
 # ─────────────────────────────────────────
 # INPUT BOUNDS (Phase 02, R6)
@@ -117,6 +117,71 @@ class PlannerRequest(BaseModel):
 class PlannerResponse(BaseModel):
     plan: str
     meta: Optional[dict] = None
+
+
+# Saved study plan (Phase 08 Slice B, ADR-017). Rows are addressed only by the
+# authenticated user id; no request carries a user id.
+PLAN_MD_MAX = 100_000
+PLAN_PROGRESS_MAX_ENTRIES = 1_000
+PLAN_PROGRESS_KEY_MAX = 160
+# `${planKey}:${section id}:${item index}` from frontend/src/lib/planMarkdown.ts
+PLAN_PROGRESS_KEY_PATTERN = r"^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:\d{1,4}$"
+STUDY_PLAN_ID_PATTERN = r"^[0-9a-f]{32}$"
+PlanProgressKey = Annotated[
+    str, Field(max_length=PLAN_PROGRESS_KEY_MAX, pattern=PLAN_PROGRESS_KEY_PATTERN)
+]
+
+
+class StudyPlanInputs(BaseModel):
+    """The non-goal planner inputs, with the same bounds as ``PlannerRequest``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hours: str = Field(default="6", max_length=SHORT_TEXT_MAX)
+    optional: Optional[str] = Field(default="Not decided", max_length=SHORT_TEXT_MAX)
+    weak: Optional[str] = Field(default="Not specified", max_length=SHORT_TEXT_MAX)
+    attempt_number: Optional[str] = Field(default="1", max_length=20)
+
+
+class StudyPlanSaveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(..., max_length=SHORT_TEXT_MAX)
+    inputs: StudyPlanInputs = Field(default_factory=StudyPlanInputs)
+    plan_md: str = Field(..., min_length=1, max_length=PLAN_MD_MAX)
+
+
+class StudyPlanProgressRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan_id: str = Field(..., pattern=STUDY_PLAN_ID_PATTERN)
+    progress: dict[PlanProgressKey, StrictBool] = Field(..., max_length=PLAN_PROGRESS_MAX_ENTRIES)
+
+
+class StudyPlanOut(BaseModel):
+    id: str
+    goal: str
+    inputs: dict
+    plan_md: str
+    meta: Optional[dict] = None
+    progress: dict[str, bool]
+    created_at: str
+    updated_at: str
+
+
+class StudyPlanEnvelope(BaseModel):
+    plan: Optional[StudyPlanOut] = None
+
+
+class StudyPlanSaveResponse(BaseModel):
+    id: str
+    updated_at: str
+
+
+class StudyPlanProgressResponse(BaseModel):
+    id: str
+    progress: dict[str, bool]
+    updated_at: str
 
 
 # ─────────────────────────────────────────
@@ -270,9 +335,28 @@ Keyword = Annotated[str, Field(max_length=100)]
 Keywords = Optional[list[Keyword]]
 
 
+# Allow-listed evaluation subjects (Phase 08 Slice C1, ADR-017). Any other value
+# is a 422. Mirrored by EVALUATION_SUBJECTS in frontend/src/lib/api.ts; each
+# value fits evaluation_attempts.subject (String(60)).
+Subject = Literal[
+    "Polity & Governance",
+    "Economy",
+    "History & Culture",
+    "Geography",
+    "Environment & Ecology",
+    "Science & Technology",
+    "International Relations",
+    "Society & Social Justice",
+    "Ethics",
+    "Internal Security & Disaster Management",
+]
+SUBJECTS: tuple[str, ...] = get_args(Subject)
+
+
 class EvaluateRequest(BaseModel):
     question: str = Field(..., min_length=5, max_length=QUESTION_MAX)
     answer: str = Field(..., min_length=50, max_length=ANSWER_MAX)
+    subject: Subject | None = None
 
 
 class MainsEvalRequest(BaseModel):
@@ -281,6 +365,7 @@ class MainsEvalRequest(BaseModel):
     marks: int = Field(default=10, ge=5, le=15)
     keywords: Keywords = Field(default=None, max_length=20)
     word_limit: int = Field(default=150, ge=1, le=1000)
+    subject: Subject | None = None
 
 
 class ModelAnswerRequest(BaseModel):

@@ -393,10 +393,11 @@ def test_mixed_blocks_keep_only_text(monkeypatch):
 )
 def test_empty_or_non_text_content_gives_failure_message(monkeypatch, content):
     out = _run_all(monkeypatch, content)
-    assert out["answer"] == "⚠️ Evaluation failed. Please try again."
-    assert out["mains"] == "⚠️ Evaluation failed. Please try again."
-    assert out["model"].endswith("⚠️ Could not generate model answer. Please try again.")
-    assert out["plan"] == "⚠️ Plan generation failed. Please try again."
+    # Failure fallbacks are stream notices (Phase 08 Slice A, Amendment A-1).
+    assert out["answer"] == "\n\n⚠️ Evaluation failed. Please try again."
+    assert out["mains"] == "\n\n⚠️ Evaluation failed. Please try again."
+    assert out["model"].endswith("\n\n⚠️ Could not generate model answer. Please try again.")
+    assert out["plan"] == "\n\n⚠️ Plan generation failed. Please try again."
 
 
 def test_all_failure_logs_are_sanitized(monkeypatch, caplog):

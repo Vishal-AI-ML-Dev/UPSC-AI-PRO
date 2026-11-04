@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from src.agents.current_affairs.prompts import DAILY_CA_PROMPT, EDITORIAL_PROMPT, MONTHLY_PROMPT
 from src.core.llm import get_llm, message_text
+from src.core.stream_notices import stream_notice
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ def get_daily_ca(selected_date: str):
             raise ValueError("model returned no text")
     except Exception as e:
         logger.error(f"Daily CA failed: {e}")
-        yield "⚠️ Could not generate current affairs. Please retry."
+        yield stream_notice("Could not generate current affairs. Please retry.")
 
 
 def get_editorial(topic: str):
@@ -181,7 +182,7 @@ def get_editorial(topic: str):
             raise ValueError("model returned no text")
     except Exception as e:
         logger.error(f"Editorial failed: {e}")
-        yield "⚠️ Could not generate editorial. Please retry."
+        yield stream_notice("Could not generate editorial. Please retry.")
 
 
 def get_monthly_summary(month: str, year: str):
@@ -245,7 +246,7 @@ def get_monthly_summary(month: str, year: str):
             raise ValueError("model returned no text")
     except Exception as e:
         logger.error(f"Monthly summary failed: {e}")
-        yield "⚠️ Could not generate monthly digest. Please retry."
+        yield stream_notice("Could not generate monthly digest. Please retry.")
 
 
 # ─────────────────────────────────────────

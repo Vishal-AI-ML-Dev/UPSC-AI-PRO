@@ -1,19 +1,27 @@
 """Dashboard progress route.
 
-`GET /progress/overview` returns the study-progress snapshot the frontend
-Dashboard renders (streak, activity heat-strip, question tallies, totals).
+`GET /progress/overview` returns the snapshot the frontend Dashboard renders
+(Mentor streak, Mentor activity strip, helpful-answer rate, totals).
 
-Everything is derived live from the user's own rows (conversations / messages /
+Everything is derived live from the caller's own rows (conversations / messages /
 feedback) - no extra tables required. The handler is fully fail-open: on any
 error it returns a valid, empty-but-well-shaped payload so the dashboard always
 renders instead of 500-ing.
 
 Notes / honest limitations:
-- `questions` uses thumbs feedback as the signal we actually have today:
+- Activity, streak, `active_days` and `questions_asked` count **Mentor chat only**:
+  only the Mentor saves server-side history (user messages). The other workflows
+  keep their state in the browser and contribute nothing here.
+- `questions` is the thumbs-feedback (helpful-answer) rate, not answer accuracy:
   total = feedback rows, correct = 👍 ("up") count, accuracy = correct / total.
-- `topics` / `weak_topics` / `revision` are placeholders (empty / zero) until a
-  topic-mastery + spaced-revision store is added; the shape is stable so the UI
-  and API contract don't change when those land.
+  The key names are kept for contract stability.
+- Evaluation analytics (Phase 08 Slice C2, ADR-017) come from the caller's own
+  `evaluation_attempts` rows (latest 500), computed on read by the pure functions
+  in `src/core/evaluation_history.py`: `evaluations` (Average Evaluation Score,
+  both modes, tagged and untagged), `subjects` (subject mastery), `weak_subjects`
+  and `revision` (subject-based revision schedule, UTC days).
+- `topics` / `weak_topics` are deprecated legacy keys and always `[]`; there is
+  no topic-level data, only subject-level.
 """
 
 from __future__ import annotations
@@ -26,7 +34,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_current_user
-from src.core import models
+from src.core import evaluation_history, models
 from src.core.db import get_db
 
 logger = logging.getLogger(__name__)
@@ -35,6 +43,25 @@ router = APIRouter(prefix="/progress", tags=["Progress"])
 
 # How many trailing days the activity heat-strip covers.
 _ACTIVITY_DAYS = 30
+
+
+def _evaluation_analytics(db: Session, user_id: str, today: date) -> dict:
+    """Slice C2 keys from the caller's own attempts (always filtered by ``user_id``).
+
+    Fail-open on its own, so an analytics failure never hides the Mentor stats.
+    """
+    try:
+        attempts = evaluation_history.load_attempts(db, user_id)
+    except Exception as exc:
+        logger.warning("progress_evaluation_analytics_failed (%s)", type(exc).__name__)
+        db.rollback()  # leave no aborted transaction behind (PostgreSQL)
+        return _evaluation_analytics_empty()
+    return {
+        "evaluations": evaluation_history.average_score(attempts),
+        "subjects": evaluation_history.subject_mastery(attempts),
+        "weak_subjects": evaluation_history.weak_subjects(attempts),
+        "revision": evaluation_history.revision_schedule(attempts, today),
+    }
 
 
 def _empty_overview() -> dict:
@@ -53,9 +80,19 @@ def _empty_overview() -> dict:
         },
         "topics": [],
         "weak_topics": [],
-        "revision": {"due": 0, "total": 0},
         "questions": {"total": 0, "correct": 0, "accuracy": 0.0},
         "totals": {"conversations": 0, "active_days": 0, "questions_asked": 0},
+        **_evaluation_analytics_empty(),
+    }
+
+
+def _evaluation_analytics_empty() -> dict:
+    """The zeroed Slice C2 keys (no attempts)."""
+    return {
+        "evaluations": evaluation_history.average_score([]),
+        "subjects": [],
+        "weak_subjects": [],
+        "revision": {"due": 0, "total": 0, "subjects": []},
     }
 
 
@@ -192,7 +229,6 @@ def progress_overview(
             },
             "topics": [],
             "weak_topics": [],
-            "revision": {"due": 0, "total": 0},
             "questions": {
                 "total": int(fb_total),
                 "correct": int(fb_up),
@@ -203,6 +239,7 @@ def progress_overview(
                 "active_days": int(active_days_total),
                 "questions_asked": int(questions_asked),
             },
+            **_evaluation_analytics(db, uid, today),
         }
     except Exception:  # pragma: no cover - fail-open so the dashboard renders
         logger.warning("progress_overview failed; returning empty snapshot", exc_info=True)

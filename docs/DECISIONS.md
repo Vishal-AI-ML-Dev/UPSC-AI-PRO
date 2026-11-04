@@ -466,3 +466,135 @@ ADR-003)
       check. LangChain gives every invoke its own run manager.
     - Deterministic tests (barrier/event interleaving) fail with the locks replaced by no-op locks and pass with them.
   - **No decision above changes.** T3 stays disabled; real-model results stay UNVERIFIED.
+
+## ADR-017 — Product persistence: latest study plan + evaluation attempts; server is authoritative; subject-level analytics
+2026-11-03 · Accepted (Phase 08 spec rev 4, `.claude/specs/phase-08-product-gaps.md`; plan `.claude/plans/phase-08-product-gaps.md`)
+- **Context:**
+  - Only the Mentor writes server-side history, and the browser makes that write. Every other workflow keeps its
+    state in `localStorage`, which `endSession()` purges at sign-out (`frontend/src/lib/session.ts`). Because only
+    one session can be active, signing in on another device loses it too.
+  - Nothing server-side stores plans, evaluation results, mastery or revision. `/progress/overview` returns
+    placeholders, the Dashboard mislabels the thumbs-up rate as "accuracy", and the Planner promises weak-area
+    autofill from evaluations that are never stored.
+- **Decision (storage):** two additive tables, each with its own Alembic migration and a working `downgrade()`, using
+  portable types only (JSON stored as Text, like `jobs.payload`):
+  - `0005_study_plans` (Slice B): `study_plans`, **UNIQUE(`user_id`)**, FK CASCADE. **Latest plan only**: saving
+    replaces it, and no unreachable history is retained.
+  - `0006_evaluation_attempts` (Slice C1): `evaluation_attempts` (`user_id`, `mode`, optional allow-listed
+    `subject`, `score` or NULL, `max_score`, `created_at`). **No question or answer text is stored.**
+- **Decision (study-plan writes):** `PUT /planner/plan` is a single-statement atomic upsert,
+  `INSERT … ON CONFLICT (user_id) DO UPDATE … RETURNING`, built with the PostgreSQL or SQLite dialect `insert`.
+  There is no read-before-write. One retry on `IntegrityError` / `OperationalError`, then a fixed-message 503.
+  Concurrent PUTs never return a 500 and never create a duplicate row. The last statement wins, and the stored row
+  is one request's complete payload with the `id` returned to that request. Rows are addressed only by the
+  authenticated `user_id`. Progress updates carry the current `plan_id` (409 if stale).
+- **Decision (source of truth):** for a signed-in user the server copy of the plan is authoritative.
+  `localStorage` is a cache and offline fallback, with an explicit reconciliation table (spec R-B6). A local
+  plan is uploaded only by an explicit user action.
+- **Decision (evaluation recording):** best-effort, after the evaluator response is built. A failure never changes
+  the response; it logs `evaluation_attempt_persist_failed` with the mode and exception type only. A score is stored
+  only if finite and 0 ≤ score ≤ `max_score` (> 0), otherwise NULL (unscored).
+- **Decision (analytics, Slice C2):** computed on read, at subject level only:
+  - Average Evaluation Score (never called "accuracy") over all scored attempts.
+  - Subject mastery over the latest 10 scored attempts per subject.
+  - Weak subjects: ≥ 3 attempts and mastery < 0.60.
+  - Revision intervals of 1/3/7/14 days by consecutive passes (≥ 0.60). A fail resets the run, so the next
+    revision is due in 1 day.
+  - Untagged attempts count toward the average only. No topic-level claims.
+  - **Addendum (Slice C2 close, 2026-11-04, owner-approved Amendment C2-1):** the Planner autofill for a blank
+    `weak` merges the caller's weak subjects **first**, then the Mentor profile `weak_areas` (case-insensitive
+    de-duplication, bounded to `SHORT_TEXT_MAX`, each source fail-open). Analytics read the caller's latest 500
+    attempts (plan bound); exactly 0.60 counts as a pass (1e-9 float tolerance). Percentages are fractions in [0, 1].
+- **Not changed:**
+  - The single active session (signing in elsewhere still ends the first session; saved data is retrievable there).
+  - The Mentor chat contract and the streaming planner endpoint.
+  - `ProgressOverview` changes are additive, and the legacy `topics` / `weak_topics` keys are kept as `[]`.
+- **Consequences:**
+  - Render runs `alembic upgrade head` on every deploy, so the owner takes a Supabase backup before deploying 0005
+    and again before 0006, and deploys them separately.
+    **Superseded 2026-11-04 (ADR-018, `docs/phase-reports/phase-08-release-preflight.md` section B):** the Docker
+    image runs every pending migration at boot (`Dockerfile:74`, `init_db()`), so any image that contains
+    `0006_evaluation_attempts.py` applies it. The recommended path is ONE combined release of 0005 + 0006 with a
+    single backup beforehand, not two deploys. The original text above is kept as history.
+  - Claude writes the migration files but never runs Alembic or writes to production.
+  - Plan history, Slice D (history delete / pagination, "my documents"), server-side Mentor history and
+    persistent cost counters stay in the backlog.
+
+## ADR-018 — Serialize Alembic runners with a PostgreSQL transaction-scoped advisory lock (Phase 08 release hardening)
+2026-11-04 · Accepted (owner-approved release hardening for Phase 08; not a reopening of any slice, not Phase 09)
+- **Context:**
+  - Two things run `alembic upgrade head` on every container boot: the Dockerfile `CMD` (`Dockerfile:74`) and
+    `init_db()` inside the FastAPI lifespan (`src/api/main.py:87` → `src/core/db.py:95`), the latter once per uvicorn
+    worker. Within one container the CMD step finishes first, so the worker runs are read-only no-ops.
+  - The real race is two containers booting against a database that still has pending revisions: both read `0004`,
+    both `CREATE TABLE study_plans`, one fails. Alembic's default env takes no lock.
+  - Owner-confirmed Render facts (not verifiable from the repository): the service is Docker, Docker Command is
+    blank (so the image `CMD` runs), Pre-Deploy Command is unavailable on the plan, Auto-Deploy is Off.
+    `render.yaml` describes a Python-runtime service with a `startCommand`; it does not govern this Docker service.
+  - Production PostgreSQL is Supabase 17.11 (owner-confirmed).
+- **Decision:** `migrations/env.py` takes `pg_advisory_xact_lock(80080601)` inside `context.begin_transaction()`,
+  on the same connection, immediately before `context.run_migrations()` (`_acquire_migration_lock`). PostgreSQL only;
+  every other dialect (SQLite in tests and local dev) is a no-op.
+  - Transaction-scoped, not session-scoped: released on commit/rollback, and safe behind a transaction-mode pooler
+    where a session lock would not be.
+  - Because all revisions run in one transaction, a waiting runner re-reads `alembic_version` after the lock is
+    released and finds nothing to do.
+  - Both call sites (CMD and `init_db()`) go through `env.py`, so one change covers both.
+  - No `lock_timeout` was added: its effect on advisory-lock waits was not verified in staging.
+- **Not changed:** `Dockerfile`, `src/core/db.py`, application startup, `render.yaml`.
+- **Evidence (disposable Docker staging, 2026-11-04; production never touched):**
+  - Images `postgres:15.19-alpine` and `postgres:17.11-alpine`, on an `--internal` network, tmpfs data, throwaway
+    credentials, build context without `.env`: 85 checks passed, 0 failed.
+  - 0004 → 0005 → 0006 upgrade, constraints / indexes / `timestamptz`, real study-plan upsert and attempt writes /
+    reads / analytics, user cascade, downgrade and re-upgrade, `init_db()` at head, Mentor `PostgresStore`
+    persistence across containers.
+  - A runner blocked while another session held the same lock key (observed waiting in `pg_locks`, schema still
+    `0004`), then completed after release.
+  - 3 concurrent runners × 10 rounds from `0004` per version: every runner exited 0 and the final revision was
+    `0006_evaluation_attempts` (20 / 20 rounds). The previous `env.py` failed 3 / 10 rounds on 15.19 and in several
+    rounds on 17.11 (`CREATE TABLE study_plans` collision), so the race is real.
+  - Not covered: Supabase itself (pooler mode, role privileges, RLS / grants), a restore of real production data,
+    Render's deploy overlap behaviour.
+- **Consequences:**
+  - ADR-017's "deploy 0005 and 0006 separately" cannot be achieved with one image: any image that contains
+    `0006_evaluation_attempts.py` applies it on boot. Either deploy a commit that has only 0005 first, or accept one
+    combined deploy of the two additive migrations (decision recorded in the deployment checklist).
+  - Rolling the image back below the database revision makes `alembic upgrade head` fail at boot; downgrade the
+    database first (data in the dropped tables is lost).
+  - Staging requirement before the first production deploy: rerun the disposable-PostgreSQL verification (both
+    versions) against the exact commit being deployed. The runner script is kept outside the repository (scratchpad);
+    adding it under `scripts/` needs owner approval.
+
+## ADR-019 — Backend-only Phase 08 tables are locked down inside their own migrations (RLS on, no API-role privileges)
+2026-11-04 · Accepted (owner-authorized final release preparation; not a reopening of any slice, not Phase 09)
+- **Context:**
+  - Supabase's default privileges grant `arwdDxtm` on future public tables to `anon`, `authenticated` and `service_role`
+    for tables created by `postgres` (owner-confirmed `pg_default_acl`). The Phase 08 migrations 0005 / 0006 set no RLS
+    and no grants, so `study_plans` and `evaluation_attempts` would have been created exposed to the Data API.
+  - The default privileges of `supabase_admin` cannot be changed by the project (`42501`) and apply only to objects that
+    role creates; ours are created by the application's migration role. The global defaults of `postgres` were
+    deliberately left alone.
+  - Existing public application tables are owned by `postgres` and the owner confirmed RLS is already enabled on all 14
+    currently listed public tables (including `alembic_version`), with `force_rls` false. Their grants and policies are
+    unchanged by this release. Existing API-role grants still appear in privilege checks; RLS is what protects those.
+  - The application and Alembic use the same direct `DATABASE_URL` (SQLAlchemy / psycopg). The repository has no
+    Supabase client, no Data API call and no `service_role` use, so both new tables are backend-only.
+- **Decision:** `migrations/versions/0005_study_plans.py` and `0006_evaluation_attempts.py` (never deployed, so
+  editable) each call `_lock_down_for_api_roles()` right after creating their table, in the same transaction:
+  - PostgreSQL only: `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, with **no policies** (deny-all for roles that do not
+    own the table);
+  - a `DO` block revokes **all** privileges on that table from `anon`, `authenticated` and `service_role`, skipping any
+    role that does not exist (`pg_roles` check), so ordinary PostgreSQL installations are unaffected;
+  - no `FORCE ROW LEVEL SECURITY`, so the owner keeps normal access; no change to existing tables, grants, policies or
+    global default privileges; SQLite is a no-op; the advisory lock (ADR-018) is unchanged.
+- **Alternatives rejected:** manual SQL run by the owner around each deploy (not reproducible, leaves a window);
+  `ALTER DEFAULT PRIVILEGES` for all future tables (broader than needed, and the owner asked to leave global defaults
+  alone).
+- **Evidence:** disposable PostgreSQL 15.19 and 17.11 staging, see `docs/phase-reports/phase-08-release-preflight.md`
+  section E. The staging role that owns the tables and runs the app is a non-superuser without BYPASSRLS, so owner access
+  is proven without relying on superuser rights.
+- **Consequences:**
+  - A downgrade drops the tables together with their RLS state; re-running the migrations re-applies the lock-down.
+  - A future backend-only table needs the same two statements in its own migration (this is a convention, not enforced).
+  - The release is ONE combined deploy of 0005 + 0006 (ADR-017 sequencing is superseded, see ADR-018); the rollback
+    preference is forward-fix, because an older image cannot boot against a newer Alembic revision.
