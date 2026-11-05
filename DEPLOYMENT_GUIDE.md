@@ -1,8 +1,8 @@
 # UPSC AI Pro — Free-Tier Deployment Guide
 
-Deploy the stack on free tiers. **Status: not deployed yet** — this guide
-describes the intended first deployment. All URLs below are placeholders
-(`<...>`); replace them with the real values once each service exists.
+Deploy the stack on free tiers. **Status: deployed** (frontend on Vercel, backend on Render; owner-reported). This is the
+original first-deployment walkthrough; the current summary is [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). URLs below remain
+placeholders (`<...>`) on purpose; the live URLs are listed in the [README](README.md).
 
 **Before you start:** finish the credential rotation and old-account cleanup
 (old GitHub/Render/Vercel access revoked, fresh provider keys). Never reuse a

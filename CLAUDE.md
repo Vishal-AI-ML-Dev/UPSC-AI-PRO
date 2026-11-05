@@ -18,7 +18,7 @@ Baseline evidence: `docs/audit/2026-11-02-architecture-audit.md`.
 | `src/core/` | Shared services: `llm.py`, `vector_store.py`, `retrieval.py`, `grounding.py`, `db.py`, `models.py`, `job_queue.py`, … |
 | `src/schemas.py` | Pydantic API contracts. ORM models are in `src/core/models.py`. |
 | `src/eval/` | Current LLM/retrieval eval harness (stays until the eval phase; see ADR-003) |
-| `migrations/` | Alembic (0001–0004) |
+| `migrations/` | Alembic (0001–0006) |
 | `tests/` | pytest; `tests/conftest.py` boots the real app on throwaway SQLite with LLM/email mocked |
 | `frontend/src/lib/api.ts` | The only API client (`request`, `streamAgent`, `pollJob`) |
 | `evals/` | Future home of evals (skeleton only) |
