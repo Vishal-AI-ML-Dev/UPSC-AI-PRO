@@ -57,8 +57,7 @@ cache/Redis, observability, NCERT/R2, jobs. Production requires `JWT_SECRET`; th
 3. Vercel builds the SPA from the same commit.
 4. **Rollback rule:** an image that includes a newer migration applies it at boot, and an older image cannot start against a newer revision;
    downgrades are destructive. Fix forward rather than using the dashboard "Rollback".
-5. Take a database backup before any migration. **No production backup has been taken under the project's runbook**
-   (`docs/runbooks/backup-restore.md`, Phase 09 Slice 1 deferred); Supabase native backups are UNVERIFIED.
+5. Take a database backup before any migration. **No production backup has been taken by the project**; a backup/restore procedure is **planned / deferred** and is not part of this release. Supabase native backups are UNVERIFIED.
 
 ## Production verification (manual)
 1. `GET /health` returns `200` with `{"status":"healthy",…}`.

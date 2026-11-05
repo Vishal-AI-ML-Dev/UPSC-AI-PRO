@@ -1,5 +1,7 @@
 # Documentation audit report — 2026-11-05
 
+> **Publication note (release cleanup).** This report was written in a working tree that also held unpublished Phase 09 work (Sentry privacy hardening commit `6c07f81`, backup/restore runbook and scripts, a log-privacy test file, `docs/DECISIONS.md` edits). The published branch is based on `origin/main` and contains **none** of it. References below to those items describe the author's local tree, not the published repository; the backup/restore and Sentry-setup runbooks are **not** part of this release. `src/eval/eval_report.md` is unmodified and its provenance remains UNVERIFIED.
+
 Record of the documentation-only upgrade: what changed, what was verified, what could not be, and how it was validated.
 No application code, tests, migrations, configuration, CI, deployment settings or Git history were changed.
 

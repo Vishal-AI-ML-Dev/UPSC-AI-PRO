@@ -1,14 +1,14 @@
 # Testing
 
 How the project is tested, what the numbers mean, and — equally important — what is **not** tested. Counts were taken on
-2026-11-05 from a working tree with uncommitted Phase 09 changes, using `pytest --collect-only` (nothing was executed).
+2026-11-05 from the author's working tree, which contained **uncommitted, unpublished Phase 09 changes** (including one extra test file), using `pytest --collect-only` (nothing was executed). The published branch contains slightly fewer tests; its exact collected count was not measured.
 
 ## Terminology (do not mix these up)
 | Term | Meaning | Current value |
 |---|---|---|
 | Test **functions** | `def test_…` definitions | 1,111 |
 | Collected **test cases** | What pytest runs after parametrization | **1,847** |
-| Passing cases | Cases that passed in a full run | Last recorded: **1765 passed, 2 skipped** (Phase 08 close, 2026-11-04); `1790 passed, 2 skipped` on the dirty Phase 09 tree. **Not re-run for this documentation task.** |
+| Passing cases | Cases that passed in a full run | Last recorded: **1765 passed, 2 skipped** (Phase 08 close, 2026-11-04); `1790 passed, 2 skipped` on the author's dirty Phase 09 tree (includes unpublished tests). **Not re-run for this documentation task.** |
 | Skipped | Conditional skips | 2 (Windows file-symlink privilege), per project records |
 | Live integration tests | Tests that call real external services | **None in the default suite** |
 | Synthetic benchmarks | Scripted performance/quality harnesses | Separate scripts under `scripts/` and `evals/`; see [EVALUATION.md](EVALUATION.md) |
@@ -52,7 +52,7 @@ A full run took roughly 3.5 minutes on the author's Windows machine in Phase 08 
 | Streaming | `test_stream_citations.py`, `test_stream_guard.py`, `test_stream_notice_prefix.py` |
 | Jobs and uploads | `test_job_queue_durability.py`, `test_upload_limits.py`, `test_input_limits.py` |
 | Persistence | `test_migrations.py`, `test_study_plans.py`, `test_evaluation_attempts.py`, `test_evaluation_analytics.py`, `test_progress_overview.py` |
-| Operations | `test_circuit_breaker.py`, `test_rate_limiter.py`, `test_response_cache.py`, `test_error_monitoring.py`, `test_logging_privacy.py`, `test_async_routes.py` |
+| Operations | `test_circuit_breaker.py`, `test_rate_limiter.py`, `test_response_cache.py`, `test_error_monitoring.py`, `test_async_routes.py` (a log-privacy test file exists only in unpublished Phase 09 work) |
 | Eval harness | `test_bench_retrieval.py`, `test_production_evals.py`, `test_eval_*.py`, `test_retrieval_eval.py` |
 | End-to-end smoke (offline) | `test_workflow_smoke.py`, `test_smoke_health.py` |
 

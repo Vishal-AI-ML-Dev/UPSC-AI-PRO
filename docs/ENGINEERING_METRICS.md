@@ -7,7 +7,7 @@ linked phase report; if it was not measured, it is marked **UNVERIFIED**.
 ## Re-audited summary (2026-11-05, documentation pass)
 Every figure below was re-measured against the current working tree on 2026-11-05, or is traced to a recorded run and
 labelled as such. **The working tree was dirty** (uncommitted Phase 09 changes in `src/`, `tests/` and `docs/`; `main` was
-one commit ahead of `origin/main`), so none of these is a clean-release number. "Resume-safe" means the figure can be
+one commit ahead of `origin/main`), so none of these is a clean-release number. **The published documentation branch is based on `origin/main` and does not contain that Phase 09 work**, so test-file/test-case counts and line counts on the branch can differ slightly from the figures below (Phase 09 added no source modules or routes, but did add a test file and edited several source files). The branch's own counts were not re-measured. "Resume-safe" means the figure can be
 quoted with the stated qualifier; it does not mean the figure proves production quality.
 
 Status labels: **MEASURED-NOW** (re-run in this pass), **RECORDED** (taken from a phase report; not re-run now),
@@ -32,7 +32,7 @@ Status labels: **MEASURED-NOW** (re-run in this pass), **RECORDED** (taken from 
 | `def test_` definitions | 1,111 | `grep -rE '^\s*(async )?def test_' tests \| wc -l` | MEASURED-NOW | Test *functions*, not cases. | Yes, if labelled "test functions" |
 | Test files | 91 `.py` files in `tests/` (includes `conftest.py`) | `ls tests/*.py` | MEASURED-NOW | | Yes |
 | Last recorded full run (clean-ish) | `1765 passed, 2 skipped` (Phase 08 close, 2026-11-04) | `docs/PROJECT_STATE.md` | RECORDED | Run on the Phase 08 working tree; not re-run. | With the date and "offline" |
-| Last recorded full run (dirty) | `1790 passed, 2 skipped` (Phase 09 Slice 2) | `docs/PROJECT_STATE.md` | RECORDED | Dirty tree. | No — prefer the Phase 08 figure |
+| Last recorded full run (dirty, unpublished) | `1790 passed, 2 skipped` (author's local Phase 09 Slice 2 notes) | **not in this branch's `docs/PROJECT_STATE.md`** | RECORDED locally only | Dirty tree with unpublished Phase 09 changes; cannot be verified from the published repository. | **No** — use the Phase 08 figure |
 | "1,845 passed, 2 skipped" (task brief) | — | not found in any repository document | **UNVERIFIED** | Not reproduced. Do **not** advertise it as the release result. | **No** |
 | Skipped tests | 2 (file-symlink escape tests that need Windows symlink privilege, per project records) | `pytest.skip` in `tests/test_bench_retrieval.py` | RECORDED | Skip reason is conditional; on Linux CI they may run. | Yes, with the reason |
 
@@ -72,7 +72,7 @@ linked from them. See [EVALUATION.md](EVALUATION.md) for what each evaluation do
 | Workflow evals T1 (offline prompt construction: untrusted values fenced, control fields absent, scope gate) | Measured (Phase 07; before fixes 55 cases: 7 pass / 21 fail; after review remediation 60 cases: 33 pass / 0 fail / 1 known gap) | [§ LLM eval & safety](#llm-eval--safety-phase-07-offline-t1--t2) |
 | Workflow evals T2 (offline scripted behaviour: plumbing, parsing, citations, score bounds; **scripted fake models**) | Measured (Phase 07; 72 pass) — not evidence of real-model behaviour | same |
 | Real-model safety, answer quality, judge scores, live eval cost (T3) | **UNVERIFIED / NOT RUN** — T3 disabled until the owner validates token bounds (Phase 07, ADR-016) | — |
-| Offline test suite size | **Historical:** `1212 passed` at Phase 05 (2026-11-02). Superseded: 1,847 cases are *collected* today and the last recorded full runs are `1765 passed, 2 skipped` (Phase 08 close) / `1790 passed, 2 skipped` (dirty Phase 09) — see the re-audited summary. Collected ≠ passed. | [phase-05 report](phase-reports/phase-05-report.md) |
+| Offline test suite size | **Historical:** `1212 passed` at Phase 05 (2026-11-02). Superseded: 1,847 cases are *collected* today and the last recorded full runs are `1765 passed, 2 skipped` (Phase 08 close) / `1790 passed, 2 skipped` (author's local dirty Phase 09 tree; unpublished) — see the re-audited summary. Collected ≠ passed. | [phase-05 report](phase-reports/phase-05-report.md) |
 
 **Reading the sections below.** They are dated, historical experiment records kept as evidence; each states its own date,
 method and limits. Older sections predate later phases, so the module counts, test counts and corpus counts quoted in

@@ -42,7 +42,7 @@ document this process. This page makes no statement about team size, customers, 
 ## Main technologies
 Python 3.13 · FastAPI · LangGraph · Google Gemini (with Groq as backup) · retrieval-augmented generation with Qdrant vector search · PostgreSQL (Supabase) ·
 JWT authentication · React + TypeScript · Docker · GitHub Actions · Vercel (frontend) · Render (backend) · Cloudflare R2 (file storage).
-Optional/not active: Sentry error monitoring and Langfuse tracing are implemented in code but not confirmed active in production.
+Optional/not active: Sentry error monitoring and Langfuse tracing exist in code but are not active or not confirmed active in production.
 
 ## Strongest engineering achievements (each backed by code and tests in the repository)
 1. **Secure multi-user design.** Every user's data, documents and chat state are isolated; the AI model is not allowed to choose which document collection it reads.

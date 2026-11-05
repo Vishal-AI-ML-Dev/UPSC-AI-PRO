@@ -107,7 +107,7 @@ Re-measured on 2026-11-05 on a working tree with uncommitted changes. Full metho
 | Registered REST operations | 54 under `/api/v1` | From the generated OpenAPI schema |
 | Backend Python | 113 modules, 20,185 physical lines (excl. `src/eval`) | Physical lines, not SLOC |
 | Frontend TS/TSX | 44 files, 7,663 physical lines | Physical lines |
-| Collected test cases | 1,847 | Offline, mocked; collected, not re-run for this doc. Last recorded full runs: 1765 passed / 2 skipped (Phase 08 close) |
+| Collected test cases | 1,847 | Offline, mocked; collected on the author's working tree (includes unpublished Phase 09 tests, so the published branch has slightly fewer), not re-run for this doc. Last recorded full runs: 1765 passed / 2 skipped (Phase 08 close) |
 | Alembic migrations | 6 | |
 | Routing bug fix | 160/200 → 0/200 misrouted | Scripted stub models |
 | Request-path benchmark | ≈ 13× in one scenario | Synthetic, local, single worker |
@@ -115,7 +115,7 @@ Re-measured on 2026-11-05 on a working tree with uncommitted changes. Full metho
 No production latency, traffic, cost or hallucination-reduction figures exist, and none are claimed.
 
 ## Screenshots
-> **UI PREVIEW ONLY - NOT LIVE AI OUTPUT.** These screenshots show the real frontend build running against a **local stand-in API that returned sample, pre-written responses**. They are not responses from Gemini/Groq, not from the deployed backend, and they say nothing about production answer quality, accuracy or speed. Details: [capture report](screenshots/README_SCREENSHOTS.md).
+> **UI PREVIEW ONLY — NOT LIVE AI OUTPUT.** These screenshots show the real frontend build running against a **local stand-in API that returned sample, pre-written responses**. They are not responses from Gemini/Groq, not from the deployed backend, and they say nothing about production answer quality, accuracy or speed. Details: [capture report](screenshots/README_SCREENSHOTS.md).
 
 <table>
 <tr>
@@ -186,7 +186,7 @@ Vercel serves the SPA; Render runs `alembic upgrade head` then uvicorn from `ren
 - Citations are formatted from retrieved sources, not verified claim by claim; only Mentor and NCERT have them.
 - Mentor replies arrive whole rather than token by token; background jobs are not resumable; Qdrant has no working fallback.
 - Tokens are kept in browser storage; there is no production backup taken yet; Sentry is implemented but not activated; there are no frontend tests.
-- Planned (not started): backup/restore drill, error monitoring activation, online evaluation, human-labelled retrieval set, NCERT gold set.
+- Planned / deferred (not in this release): backup/restore procedure and drill, error monitoring activation, additional log-privacy hardening, online evaluation, human-labelled retrieval set, NCERT gold set.
 
 ---
 **Author:** Vishal Shivhare — GenAI / Backend Engineer · [LinkedIn](https://www.linkedin.com/in/vishal-shivhare-562508243/) · License: MIT, see [LICENSE](LICENSE).

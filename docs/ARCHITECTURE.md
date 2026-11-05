@@ -108,7 +108,7 @@ tokens; every user-owned query and vector key scoped by the authenticated user i
 | Cloudflare R2 | For NCERT library | NCERT PDFs |
 | Tavily / DuckDuckGo (`ddgs`) | Optional | Mentor `web_search`, current affairs |
 | Upstash Redis | Optional | Distributed rate limit, response cache; **not set in `render.yaml`**, so production use is UNVERIFIED |
-| Langfuse, Sentry | Optional | Tracing, error capture. Sentry code is privacy-hardened but **not activated** (no DSN set); Langfuse activation UNVERIFIED |
+| Langfuse, Sentry | Optional | Tracing, error capture. Sentry code exists but is **not activated** (no DSN set; extra privacy hardening is unpublished Phase 09 work); Langfuse activation UNVERIFIED |
 | YouTube (yt-dlp) | For lecture URLs | Transcripts |
 
 ## 11. Deployment architecture

@@ -1,6 +1,6 @@
 # UPSC AI Pro — Documentation Screenshots
 
-> **UI PREVIEW ONLY - NOT LIVE AI OUTPUT.** Every screenshot here was produced against a local stand-in API with sample, pre-written responses. None shows a real LLM answer, the deployed backend, or production answer quality, accuracy or latency. In particular, `mentor-streaming.png` depicts the *streaming UI state* with sample text; the real Mentor currently delivers each answer as one completed message rather than token by token (see `docs/PROJECT_STATE.md`).
+> **UI PREVIEW ONLY — NOT LIVE AI OUTPUT.** Every screenshot here was produced against a local stand-in API with sample, pre-written responses. None shows a real LLM answer, the deployed backend, or production answer quality, accuracy or latency. In particular, `mentor-streaming.png` depicts the *streaming UI state* with sample text; the real Mentor currently delivers each answer as one completed message rather than token by token (see `docs/PROJECT_STATE.md`).
 
 Auto-generated with **Playwright** driving the **real production build** (`frontend/dist`) of UPSC AI Pro at **1920×1080**, in both **light** and **dark** themes.
 

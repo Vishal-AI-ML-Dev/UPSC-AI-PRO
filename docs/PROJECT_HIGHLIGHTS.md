@@ -54,7 +54,7 @@ Terminology and labels: [ENGINEERING_METRICS.md](ENGINEERING_METRICS.md). Interv
 
 ## 9. CI and automated testing
 - **Implemented:** GitHub Actions runs `pytest -q`, compile check, frontend type-check/build on every push and PR; nightly/manual judge gate; offline-isolated benchmark harnesses.
-- **Measured:** 1,847 collected cases; last recorded full runs `1765 passed, 2 skipped` (Phase 08 close) and `1790 passed, 2 skipped` (dirty Phase 09 tree). Lint and prettier are non-blocking; the live judge gate
+- **Measured:** 1,847 cases collected on the author's working tree (includes unpublished Phase 09 tests; the published branch has slightly fewer); last recorded full runs `1765 passed, 2 skipped` (Phase 08 close) and `1790 passed, 2 skipped` (dirty Phase 09 tree). Lint and prettier are non-blocking; the live judge gate
   targets a non-production graph; the live smoke job is disabled.
 - See [TESTING.md](TESTING.md).
 

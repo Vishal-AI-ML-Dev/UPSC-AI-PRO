@@ -58,8 +58,8 @@ are per process unless Upstash is configured.
 - Response headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, HSTS, and a Content-Security-Policy
   (relaxed only on the interactive docs pages).
 - Order: `RequestId → HttpMetrics → MaxUploadSize → RateLimit → Timeout(90 s) → SecurityHeaders → CORS`.
-- Unhandled errors return a fixed JSON message; exception text, paths and SQL are not returned. Logs use class/status summaries rather
-  than provider messages, and do not contain tokens, emails or message text (`tests/test_logging_privacy.py` exists in the working tree).
+- Unhandled errors return a fixed JSON message; exception text, paths and SQL are not returned. Earlier phases moved touched code to class/status
+  summaries instead of provider messages (ADR-008). A broader log-privacy sweep and its dedicated tests are **unpublished Phase 09 work (planned, not part of this release)**; a repo-wide guarantee that logs never contain emails or message text is **not claimed**.
 
 ## Reliability controls
 - **Provider fallback:** Gemini → Groq (`ENABLE_PROVIDER_FALLBACK`). 45-second per-call timeout; a timeout ends the request.
@@ -68,8 +68,7 @@ are per process unless Upstash is configured.
 - **Secrets handling:** configuration via environment (`pydantic-settings`); `render.yaml` marks secrets `sync: false`; `.env` is git-ignored.
 
 ## Error monitoring status
-Sentry integration (`src/core/error_monitoring.py`) is implemented and privacy-hardened (it sends unhandled errors only and
-never exception messages) but is **not active**: no DSN is configured. Langfuse tracing code exists; activation in production is
+A Sentry integration (`src/core/error_monitoring.py`) is implemented in the published code (unhandled errors only, no default PII, no performance tracing) but is **not active**: no DSN is configured. Additional privacy hardening (never sending exception messages) exists only as **unpublished, owner-pending Phase 09 work** and is not claimed here. Langfuse tracing code exists; activation in production is
 UNVERIFIED. There is **no Prometheus/metrics export**; in-process HTTP metrics feed an admin dashboard only.
 
 ## Known remaining risks
@@ -77,7 +76,7 @@ UNVERIFIED. There is **no Prometheus/metrics export**; in-process HTTP metrics f
 |---|---|---|
 | Access and refresh tokens stored in browser `localStorage` | Medium | An XSS bug would expose them; sanitized Markdown and escaped HTML reduce, not remove, this |
 | Account enumeration: register reports "Email already registered"; login skips bcrypt for unknown emails | Medium | Timing and message differences |
-| No production backup taken under the new runbook; Supabase native backups not verified | Medium (accepted by owner) | Phase 09 Slice 1 deferred |
+| No production backup has been taken; Supabase native backups not verified | Medium (accepted by owner) | Backup/restore is **planned / deferred** (no runbook in this release) |
 | Real-model prompt-injection and scope behaviour never tested live | Medium | T3 not run |
 | No per-user active-job cap; upload bytes held in memory per request | Medium | Resource-exhaustion vector for authenticated users |
 | 24-hour semantic cache can serve stale time-sensitive answers | Medium | Mentor chat only, if cache is configured |
