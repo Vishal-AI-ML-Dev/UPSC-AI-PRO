@@ -1,5 +1,7 @@
 # UPSC Agentic AI — Architecture
 
+> Maintained overview with diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Index of all documentation: [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md).
+
 A RAG backend for UPSC exam preparation, built on FastAPI + LangGraph. Mentor
 chat (`POST /agent/chat/stream`) goes through a LangGraph supervisor: one
 structured LLM routing call per message to one of 4 routes (mentor, planner,

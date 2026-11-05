@@ -4,6 +4,53 @@ Canonical place for the project's engineering measurements: what is measured, ho
 results. Created in Phase 03 (2026-11-02). Every number here must come from a command shown on this page or from a
 linked phase report; if it was not measured, it is marked **UNVERIFIED**.
 
+## Re-audited summary (2026-11-05, documentation pass)
+Every figure below was re-measured against the current working tree on 2026-11-05, or is traced to a recorded run and
+labelled as such. **The working tree was dirty** (uncommitted Phase 09 changes in `src/`, `tests/` and `docs/`; `main` was
+one commit ahead of `origin/main`), so none of these is a clean-release number. **The published documentation branch is based on `origin/main` and does not contain that Phase 09 work**, so test-file/test-case counts and line counts on the branch can differ slightly from the figures below (Phase 09 added no source modules or routes, but did add a test file and edited several source files). The branch's own counts were not re-measured. "Resume-safe" means the figure can be
+quoted with the stated qualifier; it does not mean the figure proves production quality.
+
+Status labels: **MEASURED-NOW** (re-run in this pass), **RECORDED** (taken from a phase report; not re-run now),
+**UNVERIFIED** (no evidence in the repository).
+
+### Size and structure
+| Metric | Value | Method (reproduce) | Status | Limitations | Resume-safe? |
+|---|---|---|---|---|---|
+| Backend Python files, excluding `src/eval/` | **113** (117 including `src/eval/`) | `find src -name '*.py' -not -path 'src/eval/*' -not -path '*/__pycache__/*' \| wc -l` | MEASURED-NOW | The earlier audit quoted "117 excluding `src/eval`"; 117 is the count *with* `src/eval`. | Yes ("113 backend modules") |
+| Backend physical lines, excluding `src/eval/` | **20,185** | same file set, `cat \| wc -l` | MEASURED-NOW | Physical lines (code + comments + blanks). **Not SLOC.** | Only as "about 20k lines of Python" |
+| Backend non-blank, non-comment-only lines | 15,525 | same set, `grep -vE '^\s*(#.*)?$' \| wc -l` | MEASURED-NOW | A rough proxy for code size; docstrings and multi-line strings still count. Not a SLOC tool result. | Prefer the 20k physical figure with its label |
+| Frontend TS/TSX files / physical lines | **44 files / 7,663 lines** (6,869 non-blank, non-`//`-comment) | `find frontend/src \( -name '*.ts' -o -name '*.tsx' \)` | MEASURED-NOW | Excludes `node_modules`, `dist`, config files. Physical lines. | Yes, with "lines" not "SLOC" |
+| Registered REST operations | **54** under `/api/v1` (**56** including `/` and `/health`) | `app.openapi()` operations, counted in a throwaway script | MEASURED-NOW | OpenAPI lists 54 paths; some paths carry several methods. `mentor.py` is not registered and is not counted. | Yes ("54 REST endpoints") |
+| User-facing workflows | **8** | [WORKFLOWS.md](WORKFLOWS.md) | MEASURED-NOW (route inventory) | Eight *workflows*, not eight agents. Only AI Mentor uses the LangGraph supervisor. | Yes, worded as "workflows" |
+| Alembic migrations | **6** (0001–0006) | `ls migrations/versions` | MEASURED-NOW | `CLAUDE.md` was corrected from 0001–0004 to 0001–0006 on 2026-11-05; older phase reports legitimately mention earlier heads. | Yes |
+| ORM tables defined in `src/core/models.py` | 10 (`users`, `conversations`, `messages`, `feedback`, `password_reset_tokens`, `email_verification_tokens`, `refresh_tokens`, `jobs`, `study_plans`, `evaluation_attempts`) | `grep __tablename__` | MEASURED-NOW | LangGraph checkpoint/store tables are created at runtime outside Alembic. | Yes |
+
+### Tests
+| Metric | Value | Method | Status | Limitations | Resume-safe? |
+|---|---|---|---|---|---|
+| Collected test cases | **1,847** | `uv run pytest --collect-only -q` (no tests executed) | MEASURED-NOW | Dirty tree. Includes parametrized expansions. Collection proves the tests import, not that they pass. | Yes: "1,847 collected offline tests" |
+| `def test_` definitions | 1,111 | `grep -rE '^\s*(async )?def test_' tests \| wc -l` | MEASURED-NOW | Test *functions*, not cases. | Yes, if labelled "test functions" |
+| Test files | 91 `.py` files in `tests/` (includes `conftest.py`) | `ls tests/*.py` | MEASURED-NOW | | Yes |
+| Last recorded full run (clean-ish) | `1765 passed, 2 skipped` (Phase 08 close, 2026-11-04) | `docs/PROJECT_STATE.md` | RECORDED | Run on the Phase 08 working tree; not re-run. | With the date and "offline" |
+| Last recorded full run (dirty, unpublished) | `1790 passed, 2 skipped` (author's local Phase 09 Slice 2 notes) | **not in this branch's `docs/PROJECT_STATE.md`** | RECORDED locally only | Dirty tree with unpublished Phase 09 changes; cannot be verified from the published repository. | **No** — use the Phase 08 figure |
+| "1,845 passed, 2 skipped" (task brief) | — | not found in any repository document | **UNVERIFIED** | Not reproduced. Do **not** advertise it as the release result. | **No** |
+| Skipped tests | 2 (file-symlink escape tests that need Windows symlink privilege, per project records) | `pytest.skip` in `tests/test_bench_retrieval.py` | RECORDED | Skip reason is conditional; on Linux CI they may run. | Yes, with the reason |
+
+### Evaluation and benchmarks (all offline or synthetic; details in the sections below)
+| Metric | Value | Source | Status | Limitations | Resume-safe? |
+|---|---|---|---|---|---|
+| Retrieval benchmark | **97 queries** (84 answerable + 13 unanswerable) over **4 corpora with labels** (mentor KB + 3 synthetic: `upload_style`, `lecture_style`, `pyq_style`); NCERT is supported but empty → *not* five corpora | `scripts/bench_retrieval.py`, `src/eval/retrieval_gold.json` | RECORDED (Phase 06) | Labels were written by Claude and are `human_verified: false`; corpora are 11–61 chunks; three are synthetic. | Only with all three qualifiers |
+| Pooled Recall@k / MRR@k (production variant) | 0.988 / 0.935 | Phase 06 below | RECORDED | Ceiling effect on easy, small, AI-labelled data. **Not evidence of production retrieval quality.** | **No** as a headline; "baseline on a small synthetic benchmark" only |
+| No-answer false-positive retrieval rate | **13/13 = 1.00** at the configured thresholds | Phase 06 below | RECORDED | Retrieval-only (no answer was generated); n = 13. Configured thresholds (0.3 / 0.25) remove nothing on these corpora. Documented, not fixed (ADR-015). | Yes, as an honest limitation |
+| Routing misclassification | **160/200 → 0/200** | `scripts/bench_routing.py`, Phase 05 | RECORDED | **Scripted/stubbed router and specialists.** It measures that a persisted route no longer decides later messages (a bug fix), not LLM routing accuracy. | Only as "fixed a routing-state bug; 0/200 in an offline stubbed benchmark" |
+| Synthetic request-path throughput | ~**13×** (1.38–1.62 → 19.1–20.0 req/s, scenario A) | `scripts/bench_request_path.py`, Phase 03 | RECORDED | Local, one worker, synthetic 0.5 s blocking "LLM", fake auth, Windows dev machine. Not production traffic. Other scenarios differ (C ≈ 6–9×, D ≈ 8×, B no consistent change). | Only as "synthetic local benchmark" |
+| Prompt-injection findings | **21 failures** in the Phase 07 offline **T1** tier on pre-fix code (55 cases); **0 failures** after fixes (60 cases, 1 known gap) | `evals/`, Phase 07 | RECORDED | T1 checks that untrusted text reaches the prompt only inside a fence; it does **not** test a real model's behaviour. T3 (live model) was never run. | Only as "prompt-construction defects found by an offline eval and fixed" |
+| Production P50/P95/P99 latency, cost, traffic, users | — | — | **UNVERIFIED / not measured** | No production measurements exist in the repository. | **No** |
+| Hallucination reduction | — | — | **UNVERIFIED / not measured** | No comparative evaluation exists. | **No** |
+
+Source of truth for each row: the commands in the middle column, and the sections of this page and the phase reports
+linked from them. See [EVALUATION.md](EVALUATION.md) for what each evaluation does and does not prove.
+
 ## Measurement status
 | Metric | Status | Source |
 |---|---|---|
@@ -25,7 +72,12 @@ linked phase report; if it was not measured, it is marked **UNVERIFIED**.
 | Workflow evals T1 (offline prompt construction: untrusted values fenced, control fields absent, scope gate) | Measured (Phase 07; before fixes 55 cases: 7 pass / 21 fail; after review remediation 60 cases: 33 pass / 0 fail / 1 known gap) | [§ LLM eval & safety](#llm-eval--safety-phase-07-offline-t1--t2) |
 | Workflow evals T2 (offline scripted behaviour: plumbing, parsing, citations, score bounds; **scripted fake models**) | Measured (Phase 07; 72 pass) — not evidence of real-model behaviour | same |
 | Real-model safety, answer quality, judge scores, live eval cost (T3) | **UNVERIFIED / NOT RUN** — T3 disabled until the owner validates token bounds (Phase 07, ADR-016) | — |
-| Offline test suite size | `1212 passed` (Phase 05 review round 2 run) | [phase-05 report](phase-reports/phase-05-report.md) |
+| Offline test suite size | **Historical:** `1212 passed` at Phase 05 (2026-11-02). Superseded: 1,847 cases are *collected* today and the last recorded full runs are `1765 passed, 2 skipped` (Phase 08 close) / `1790 passed, 2 skipped` (author's local dirty Phase 09 tree; unpublished) — see the re-audited summary. Collected ≠ passed. | [phase-05 report](phase-reports/phase-05-report.md) |
+
+**Reading the sections below.** They are dated, historical experiment records kept as evidence; each states its own date,
+method and limits. Older sections predate later phases, so the module counts, test counts and corpus counts quoted in
+them were true *at that time*; the re-audited summary above holds the current figures. No section below contains
+production latency, traffic, cost, user or quality measurements - none exist (see the UNVERIFIED rows above).
 
 **Do not cite the synthetic numbers as production performance.** They show how the request path behaves when work
 blocks (queueing, event-loop stalls, the Upstash thread budget), on one machine, with fake dependencies.
@@ -193,7 +245,9 @@ Postgres, real Render deploy overlap and `WEB_CONCURRENCY>1` under HTTP load are
 Harness: `scripts/bench_routing.py` (Phase 05). It runs 20 conversations of 10 mixed messages (planner, mentor,
 current affairs, evaluator) through the **real compiled supervisor graph** on an `InMemorySaver` checkpointer. The
 router LLM and every specialist are offline stubs, so it measures routing behaviour and graph overhead, **not model
-latency**. Isolation is the same as `bench_jobs.py`: allow-listed environment, offline settings, `chdir` into a temp
+latency**. Methodology limit: because the models are scripted, the benchmark proves that the graph no longer reuses a
+stale saved route (a state bug); it does **not** measure how accurately a real LLM classifies messages (UNVERIFIED).
+Isolation is the same as `bench_jobs.py`: allow-listed environment, offline settings, `chdir` into a temp
 dir. No network, no keys. Token counts are **estimates** (characters / 4), not a tokenizer.
 
 ```bash
@@ -452,6 +506,11 @@ Harness: `evals/` (ADR-016). Run: `uv run python -m evals.runners.run_production
 - Offline isolation: scripted fake models, network blocked, client tripwires, a temp embedded Qdrant with fake
   embeddings.
 
+**Evidence tiers.** T1 = deterministic, offline checks of the prompts the production code builds (is every untrusted
+value inside a fence). T2 = offline behaviour with scripted fake models. T3 = live real-model run (not run). The "21
+failures" below are **T1 prompt-construction defects**, dated 2026-11-03, found on unfixed code; they are not
+observations of a real model being injected.
+
 **What this shows and what it does not**
 - **T1** shows whether every untrusted value reaches the prompt only inside an untrusted-source fence.
 - **T2** shows plumbing and parsing with scripted replies.
@@ -493,3 +552,14 @@ Harness: `evals/` (ADR-016). Run: `uv run python -m evals.runners.run_production
 - Every model in `evals/pricing.json` ships `token_bound.status: "unvalidated"` with null prices, so live mode refuses
   before any request.
 - The dry-run estimate uses the experimental `utf8_bytes` bound. It is not a validated upper bound.
+
+## CI judge gate status (faithfulness / relevancy / precision)
+- `.github/workflows/ci.yml` defines a `llm-eval` job running `src/eval/llm_eval.py` with gates 0.9 / 0.7 / 0.6. It runs **only on the nightly
+  schedule or manual dispatch** and needs repository secrets; it is not part of the per-commit gate.
+- It evaluates the CRAG graph (`src/graph/rag_graph.py`), which is **not reachable over HTTP**, so it does not exercise the production answer path.
+- The committed `src/eval/eval_report.md` is a 3-case sample (faithfulness 0.95); when and how it was produced is **UNVERIFIED**, and whether the job has
+  ever run in GitHub is **UNVERIFIED**. There is **no production faithfulness score**; do not quote 0.9 as an achieved or enforced production value.
+
+## Never measured (no evidence in the repository)
+Production P50/P95/P99 latency, real LLM latency and token usage, per-workflow cost, user counts and traffic, real-model routing accuracy, real-model
+prompt-injection resistance, NCERT retrieval quality, production Qdrant latency, hallucination reduction versus any baseline.
